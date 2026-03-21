@@ -20,9 +20,10 @@ You receive:
 - the cited repository evidence used to answer it
 
 Your job:
-1. Judge whether the draft answer is grounded, cited well, complete, and appropriately cautious.
+1. Produce the best possible final answer for the user from the provided repository evidence.
 2. If the draft answer has problems, rewrite it into a better final answer.
 3. If the draft answer is already good, preserve it with only minimal edits.
+4. Optional diagnostics are allowed, but they are secondary to returning a usable final answer.
 
 Hard rules for the final answer:
 - Use only the provided repository evidence.
@@ -30,22 +31,36 @@ Hard rules for the final answer:
 - Keep inline citations in the format [path:start-end].
 - If the evidence is insufficient, say so clearly.
 - Return the best final answer for the user. Do not mention judging, review, or internal evaluation.
+- `final_answer` must always be present and non-empty.
+- Optional fields may include: `needs_revision`, `rationale`, `groundedness`, `citation_quality`, `completeness`, `insufficiency_handling`.
+- Optional diagnostic fields may be numeric scores or qualitative labels such as "high", "adequate", or "weak".
 
 Return strict JSON only.
 """
 
 
 class JudgeReview(BaseModel):
-    groundedness: int = Field(..., ge=1, le=5)
-    citation_quality: int = Field(..., ge=1, le=5)
-    completeness: int = Field(..., ge=1, le=5)
-    insufficiency_handling: int = Field(..., ge=1, le=5)
+    groundedness: int | None = Field(default=None, ge=1, le=5)
+    citation_quality: int | None = Field(default=None, ge=1, le=5)
+    completeness: int | None = Field(default=None, ge=1, le=5)
+    insufficiency_handling: int | None = Field(default=None, ge=1, le=5)
     needs_revision: bool = False
-    rationale: str
+    rationale: str = ""
     final_answer: str
 
 
 class LLMJudgeService:
+    _DIAGNOSTIC_LABELS = {
+        "high": 5,
+        "strong": 5,
+        "medium": 3,
+        "adequate": 3,
+        "acceptable": 3,
+        "low": 1,
+        "weak": 1,
+        "poor": 1,
+    }
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._client: OpenAI | None = None
@@ -56,28 +71,46 @@ class LLMJudgeService:
         draft_answer: str,
         sources: list[SourceSnippet],
     ) -> str:
-        client = self._get_client()
         logger.info("Running LLM-as-a-Judge for question: %s", question)
         prompt = self._build_prompt(question, draft_answer, sources)
-        completion = client.chat.completions.create(
-            model=self.settings.openai_chat_model,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-        )
+        try:
+            client = self._get_client()
+            completion = client.chat.completions.create(
+                model=self.settings.openai_chat_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("LLM judge API failure; falling back to draft answer.", exc_info=True)
+            return draft_answer
+
         content = completion.choices[0].message.content or "{}"
         try:
             payload = json.loads(content)
-            normalized = self._normalize_payload(payload)
-            review = JudgeReview.model_validate(normalized)
-            final_answer = review.final_answer.strip()
-            return final_answer or draft_answer
-        except Exception:  # noqa: BLE001
-            logger.warning("LLM judge returned invalid payload: %s", content[:800], exc_info=True)
+        except json.JSONDecodeError:
+            logger.warning("LLM judge JSON parse failure; falling back to draft answer. Payload: %s", content[:800], exc_info=True)
             return draft_answer
+
+        try:
+            normalized, used_normalization_fallback = self._normalize_payload(payload)
+            review = JudgeReview.model_validate(normalized)
+        except Exception:  # noqa: BLE001
+            logger.warning("LLM judge payload validation failure; falling back to draft answer. Payload: %s", content[:800], exc_info=True)
+            return draft_answer
+
+        if used_normalization_fallback:
+            logger.warning("LLM judge diagnostic normalization fallback used for one or more fields.")
+
+        final_answer = review.final_answer.strip()
+        if not final_answer:
+            logger.warning("LLM judge returned empty final_answer; falling back to draft answer.")
+            return draft_answer
+
+        return final_answer
 
     def _build_prompt(
         self,
@@ -110,7 +143,10 @@ class LLMJudgeService:
                 "Cited evidence:",
                 "\n\n".join(source_blocks) if source_blocks else "No sources were returned.",
                 "",
-                "Return JSON with keys: groundedness, citation_quality, completeness, insufficiency_handling, needs_revision, rationale, final_answer.",
+                "Return JSON only.",
+                "Required key: final_answer.",
+                "Optional keys: needs_revision, rationale, groundedness, citation_quality, completeness, insufficiency_handling.",
+                "Optional diagnostic values may be numbers or qualitative labels.",
             ]
         )
 
@@ -125,13 +161,12 @@ class LLMJudgeService:
             self._client = OpenAI(api_key=self.settings.openai_api_key)
         return self._client
 
-    def _normalize_payload(self, payload: dict) -> dict:
+    def _normalize_payload(self, payload: dict) -> tuple[dict, bool]:
         normalized = dict(payload)
+        used_normalization_fallback = False
         for key in ("groundedness", "citation_quality", "completeness", "insufficiency_handling"):
-            value = normalized.get(key)
-            if isinstance(value, str):
-                digits = "".join(char for char in value if char.isdigit())
-                normalized[key] = int(digits) if digits else value
+            normalized[key], used_fallback = self._normalize_diagnostic_value(normalized.get(key))
+            used_normalization_fallback = used_normalization_fallback or used_fallback
 
         if not normalized.get("rationale"):
             normalized["rationale"] = "Judge response was incomplete."
@@ -141,4 +176,25 @@ class LLMJudgeService:
         if isinstance(needs_revision, str):
             normalized["needs_revision"] = needs_revision.strip().lower() in {"true", "yes", "1"}
 
-        return normalized
+        return normalized, used_normalization_fallback
+
+    def _normalize_diagnostic_value(self, value: object) -> tuple[int | None, bool]:
+        if value is None or value == "":
+            return None, False
+        if isinstance(value, bool):
+            return None, True
+        if isinstance(value, int):
+            return value if 1 <= value <= 5 else None, not (1 <= value <= 5)
+        if isinstance(value, float):
+            integer_value = int(value)
+            return (integer_value, False) if 1 <= integer_value <= 5 else (None, True)
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned in self._DIAGNOSTIC_LABELS:
+                return self._DIAGNOSTIC_LABELS[cleaned], False
+            digits = "".join(char for char in cleaned if char.isdigit())
+            if digits:
+                numeric_value = int(digits)
+                return (numeric_value, False) if 1 <= numeric_value <= 5 else (None, True)
+            return None, True
+        return None, True
