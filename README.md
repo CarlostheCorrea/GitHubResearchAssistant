@@ -88,8 +88,8 @@ This means the user only sees the revised final answer, not the intermediate dra
 If you are starting from GitHub, clone the repository and move into the project folder first.
 
 ```bash
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
+git clone https://github.com/CarlostheCorrea/GitHubResearchAssistant.git
+cd GitHubResearchAssistant
 ```
 
 Replace the URL and folder name above with the actual repository you pushed to GitHub.
