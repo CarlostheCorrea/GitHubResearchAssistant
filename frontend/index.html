@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI GitHub Research Assistant</title>
+    <link rel="stylesheet" href="/frontend/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero card">
+        <div class="hero-copy">
+          <p class="eyebrow">Portfolio MVP</p>
+          <h1>AI GitHub Research Assistant</h1>
+          <p class="hero-text">
+            Paste a public GitHub repository URL, build a code-aware vector index, and ask grounded questions with file citations and snippet evidence.
+          </p>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric">
+            <span class="metric-label">Retrieval</span>
+            <strong>Code-aware RAG</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Chunking</span>
+            <strong>AST + logical blocks</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Evidence</span>
+            <strong>Inline citations</strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel card">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h2>Analyze Repository</h2>
+            </div>
+            <div id="status-badge" class="status-badge idle">Idle</div>
+          </div>
+
+          <form id="analyze-form" class="repo-form">
+            <label class="field">
+              <span>GitHub repository URL</span>
+              <input
+                id="repo-url"
+                type="url"
+                placeholder="https://github.com/owner/repo"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <div class="action-row">
+              <button id="analyze-button" type="submit">Analyze Repo</button>
+              <button id="clear-cache-button" type="button" class="secondary-button">Clear All Cache</button>
+              <span id="cache-indicator" class="cache-indicator hidden" aria-live="polite"></span>
+            </div>
+          </form>
+
+          <div id="status-message" class="status-message">
+            Waiting for a repository URL.
+          </div>
+        </section>
+
+        <section class="panel card">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Step 2</p>
+              <h2>Repository Overview</h2>
+            </div>
+          </div>
+
+          <div id="repo-summary-empty" class="empty-state">
+            Run an analysis to see the repo summary, language mix, key files, and likely training or inference entry points.
+          </div>
+
+          <div id="repo-summary" class="summary-grid hidden">
+            <div class="summary-card span-2">
+              <p class="summary-label">High-level summary</p>
+              <div id="summary-text" class="summary-text"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Repository</p>
+              <p id="summary-name" class="summary-value"></p>
+              <p id="summary-branch" class="summary-subvalue"></p>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Indexed footprint</p>
+              <p id="summary-footprint" class="summary-value"></p>
+              <p id="summary-languages" class="summary-subvalue"></p>
+            </div>
+            <div class="summary-card span-2">
+              <p class="summary-label">Key files</p>
+              <div id="key-files" class="chip-list"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Probable entry points</p>
+              <div id="entry-files" class="chip-list"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Training files</p>
+              <div id="training-files" class="chip-list"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Inference files</p>
+              <div id="inference-files" class="chip-list"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Config files</p>
+              <div id="config-files" class="chip-list"></div>
+            </div>
+            <div class="summary-card">
+              <p class="summary-label">Data-loading files</p>
+              <div id="data-files" class="chip-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel card">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h2>Ask Grounded Questions</h2>
+            </div>
+          </div>
+
+          <form id="ask-form" class="ask-form">
+            <label class="field">
+              <span>Question</span>
+              <textarea
+                id="question-input"
+                rows="4"
+                placeholder="How does this repo train the model?"
+                disabled
+                required
+              ></textarea>
+            </label>
+            <div class="sample-questions">
+              <button type="button" class="sample-chip">How does this repo train the model?</button>
+              <button type="button" class="sample-chip">Where is the inference code?</button>
+              <button type="button" class="sample-chip">How is data loaded?</button>
+              <button type="button" class="sample-chip">Where is configuration defined?</button>
+            </div>
+            <button id="ask-button" type="submit" disabled>Ask</button>
+          </form>
+        </section>
+
+        <section class="panel card answer-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Output</p>
+              <h2>Grounded Answer</h2>
+            </div>
+          </div>
+          <div id="answer-empty" class="empty-state">
+            Answers will appear here with retrieved evidence and cited source snippets.
+          </div>
+          <div id="answer-content" class="hidden">
+            <pre id="answer-text" class="answer-text"></pre>
+          </div>
+        </section>
+
+        <section class="panel card sources-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Evidence</p>
+              <h2>Retrieved Source Snippets</h2>
+            </div>
+          </div>
+          <div id="sources-empty" class="empty-state">
+            Retrieved chunks, line ranges, and snippet previews will appear after a question is answered.
+          </div>
+          <div id="sources-list" class="sources-list hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/frontend/app.js" defer></script>
+  </body>
+</html>
