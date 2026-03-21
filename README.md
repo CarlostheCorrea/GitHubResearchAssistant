@@ -83,6 +83,10 @@ This means the user only sees the revised final answer, not the intermediate dra
 
 ## Setup Instructions
 
+### Platform compatibility
+
+The application code is designed to run on macOS, Linux, and Windows. The main cross-platform risk is Python dependency installation, especially native packages pulled in by `chromadb` such as `grpcio`. If installation fails on Windows, use a current 64-bit Python release, upgrade `pip`, and install dependencies inside a fresh virtual environment.
+
 ### 1. Clone and enter the project
 
 If you are starting from GitHub, clone the repository and move into the project folder first.
@@ -96,14 +100,53 @@ Replace the URL and folder name above with the actual repository you pushed to G
 
 ### 2. Install dependencies
 
+Create and activate a virtual environment first, then install dependencies.
+
+macOS / Linux:
+
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
+```
+
+Windows Command Prompt:
+
+```bash
+py -m venv .venv
+.venv\Scripts\activate.bat
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
 ```
 
 ### 3. Create the environment file
 
+macOS / Linux:
+
 ```bash
 cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Windows Command Prompt:
+
+```bat
+copy .env.example .env
 ```
 
 Then add your keys to `.env`:
@@ -128,8 +171,16 @@ GITHUB_TOKEN=
 
 ### 4. Start the app
 
+macOS / Linux:
+
 ```bash
 uvicorn backend.main:app --reload
+```
+
+Windows PowerShell or Command Prompt:
+
+```powershell
+py -m uvicorn backend.main:app --reload
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
