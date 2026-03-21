@@ -157,6 +157,10 @@ Open the app in your browser, paste a public GitHub repository URL into the repo
 
 The backend will fetch the repository, filter supported files, chunk the contents, generate embeddings, and build a local Chroma index. Once analysis completes, the Repository Overview section will show the repo summary, language mix, key files, likely entry points, configuration files, and other surfaced repository areas.
 
+<img width="1505" height="705" alt="Screenshot 2026-03-21 at 2 57 20 PM" src="https://github.com/user-attachments/assets/59a0b105-f4a6-4412-961c-6d62ee67cdbe" />
+
+<img width="524" height="598" alt="Screenshot 2026-03-21 at 2 58 03 PM" src="https://github.com/user-attachments/assets/9f084f42-ea43-4e38-887b-64fdd9156e8c" />
+
 ### 2. Ask repository questions
 
 After analysis completes, use the question box in Step 3 to ask natural-language questions about the repository. Good example questions include:
@@ -170,6 +174,8 @@ After analysis completes, use the question box in Step 3 to ask natural-language
 
 When you submit a question, the system retrieves the most relevant chunks, drafts an answer, internally reviews that answer with the judge pass, and then returns the final grounded answer.
 
+<img width="502" height="144" alt="Screenshot 2026-03-21 at 3 00 41 PM" src="https://github.com/user-attachments/assets/5fc65a4f-dc35-4051-99f7-cbcac7396130" />
+
 ### Inspect sources
 
 The right-hand evidence panel shows the retrieved source snippets used to answer the question. Each source card includes:
@@ -181,6 +187,8 @@ The right-hand evidence panel shows the retrieved source snippets used to answer
 - retrieval score
 
 Use this panel to verify where the answer came from and to inspect the underlying code directly.
+
+<img width="510" height="504" alt="Screenshot 2026-03-21 at 3 00 31 PM" src="https://github.com/user-attachments/assets/2f541011-457d-4714-b708-9e48cced640a" />
 
 ### Clear cached data
 
