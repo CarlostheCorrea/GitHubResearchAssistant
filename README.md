@@ -218,9 +218,12 @@ Open the app in your browser, paste a public GitHub repository URL into the repo
 
 The backend will fetch the repository, filter supported files, chunk the contents, generate embeddings, and build a local Chroma index. Once analysis completes, the Repository Overview section will show the repo summary, language mix, key files, likely entry points, configuration files, and other surfaced repository areas.
 
-<img width="1505" height="705" alt="Screenshot 2026-03-21 at 2 57 20 PM" src="https://github.com/user-attachments/assets/59a0b105-f4a6-4412-961c-6d62ee67cdbe" />
+<img width="1026" height="447" alt="Screenshot 2026-03-23 at 5 11 42 PM" src="https://github.com/user-attachments/assets/504ea4ad-321f-4458-b4d4-01dba184b2d5" />
 
-<img width="524" height="598" alt="Screenshot 2026-03-21 at 2 58 03 PM" src="https://github.com/user-attachments/assets/9f084f42-ea43-4e38-887b-64fdd9156e8c" />
+<img width="753" height="586" alt="Screenshot 2026-03-23 at 5 12 00 PM" src="https://github.com/user-attachments/assets/88a358f7-4980-42d0-bf84-da1dba3cbaf6" />
+
+<img width="760" height="688" alt="Screenshot 2026-03-23 at 5 12 14 PM" src="https://github.com/user-attachments/assets/98e7b6c5-6a22-49eb-8c9d-941884b5e701" />
+
 
 ### 2. Ask repository questions
 
@@ -235,7 +238,8 @@ After analysis completes, use the question box in Step 3 to ask natural-language
 
 When you submit a question, the system retrieves the most relevant chunks, drafts an answer, internally reviews that answer with the judge pass, and then returns the final grounded answer.
 
-<img width="502" height="144" alt="Screenshot 2026-03-21 at 3 00 41 PM" src="https://github.com/user-attachments/assets/5fc65a4f-dc35-4051-99f7-cbcac7396130" />
+<img width="1002" height="293" alt="Screenshot 2026-03-23 at 5 12 43 PM" src="https://github.com/user-attachments/assets/c7eeb89b-8c2c-4ce1-b498-58ecf2cc45eb" />
+
 
 ### Inspect sources
 
@@ -249,7 +253,8 @@ The right-hand evidence panel shows the retrieved source snippets used to answer
 
 Use this panel to verify where the answer came from and to inspect the underlying code directly.
 
-<img width="510" height="504" alt="Screenshot 2026-03-21 at 3 00 31 PM" src="https://github.com/user-attachments/assets/2f541011-457d-4714-b708-9e48cced640a" />
+<img width="987" height="510" alt="Screenshot 2026-03-23 at 5 13 01 PM" src="https://github.com/user-attachments/assets/939c16cc-8482-4f9a-af5a-2ae46b13b636" />
+
 
 ### Clear cached data
 
