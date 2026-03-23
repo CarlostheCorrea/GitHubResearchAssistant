@@ -28,9 +28,10 @@ Your job:
 Hard rules for the final answer:
 - Use only the provided repository evidence.
 - Do not invent files, functions, classes, behavior, or architecture.
-- Keep inline citations in the format [path:start-end].
 - If the evidence is insufficient, say so clearly.
 - Return the best final answer for the user. Do not mention judging, review, or internal evaluation.
+- Write plain prose only, with no code fences, markdown bullets, numbered lists, or inline code formatting.
+- Do not append bracketed file citations or line-range references in the answer body.
 - `final_answer` must always be present and non-empty.
 - Optional fields may include: `needs_revision`, `rationale`, `groundedness`, `citation_quality`, `completeness`, `insufficiency_handling`.
 - Optional diagnostic fields may be numeric scores or qualitative labels such as "high", "adequate", or "weak".

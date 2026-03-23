@@ -122,6 +122,10 @@ class RepoSummary(BaseModel):
     language_distribution: dict[str, int] = Field(default_factory=dict)
     key_files: list[str] = Field(default_factory=list)
     high_level_summary: str
+    global_context: str = ""
+    critical_paths: list[list[str]] = Field(default_factory=list)
+    dependency_links: list[list[str]] = Field(default_factory=list)
+    graph_hubs: list[str] = Field(default_factory=list)
     readme_excerpt: str | None = None
     probable_entry_points: list[str] = Field(default_factory=list)
     probable_training_files: list[str] = Field(default_factory=list)

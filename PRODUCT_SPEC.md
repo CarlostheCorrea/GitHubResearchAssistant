@@ -97,10 +97,9 @@ The product solves this by combining repository ingestion, chunking, retrieval, 
 
 ### Optional Knowledge Graph
 
-- Optionally project repository structure into Neo4j.
 - Create graph entities for repositories, files, languages, and symbols.
 - Store structural relationships such as repository-to-file and file-to-symbol.
-- Keep graph sync optional and non-blocking for the main app workflow.
+- Keep graph construction local and non-blocking for the main app workflow.
 
 ## API-Level Capabilities
 
@@ -120,7 +119,6 @@ The product solves this by combining repository ingestion, chunking, retrieval, 
 - GitHub repository URL
 - User question
 - Environment configuration for OpenAI and optional GitHub token
-- Optional Neo4j connection settings
 
 ## Outputs
 
@@ -129,7 +127,7 @@ The product solves this by combining repository ingestion, chunking, retrieval, 
 - Inline citations
 - Retrieved source snippets
 - Local cache artifacts
-- Optional Neo4j knowledge graph records
+- Local graph-derived repository context
 
 ## Success Criteria
 
@@ -145,7 +143,7 @@ The product solves this by combining repository ingestion, chunking, retrieval, 
 2. Quality depends on repository file quality, retrieval coverage, and prompt behavior.
 3. Large or unusual repositories may have incomplete coverage.
 4. Native Python dependencies can make setup more fragile across environments.
-5. Optional Neo4j support adds infrastructure only when explicitly configured.
+5. Graph-derived context is only as strong as the inferred file and symbol relationships.
 
 ## Future Directions
 

@@ -7,15 +7,19 @@ from backend.models import ChunkRecord, RepoSummary
 from backend.utils import line_range_label, looks_like_placeholder_secret
 
 
-SYSTEM_PROMPT = """You answer questions about a GitHub repository using only retrieved repository evidence.
+SYSTEM_PROMPT = """You answer questions about a GitHub repository using retrieved repository evidence plus optional repository-wide graph context.
 
 Rules:
-- Use only the provided repository context.
+- Use the global graph context only as high-level structural guidance.
+- Ground concrete claims in the retrieved repository chunks.
 - If the evidence is insufficient or ambiguous, say so directly.
 - Do not invent files, functions, classes, behavior, or architecture.
-- Cite evidence inline with file paths and line ranges in the format [path:start-end].
 - Explain relationships across files only when the retrieved context supports that connection.
 - Prefer concise, technical answers over generic descriptions.
+- Return plain prose only.
+- Do not use code fences, markdown bullets, numbered lists, or inline code formatting.
+- Do not append bracketed file citations or line-range references in the answer body.
+- Summarize behavior instead of reproducing implementation steps line by line.
 """
 
 
@@ -78,13 +82,14 @@ class QAService:
                 f"Detected languages: {', '.join(repo_summary.detected_languages)}",
                 f"Key files: {', '.join(repo_summary.key_files[:8]) or 'n/a'}",
                 f"High-level summary: {repo_summary.high_level_summary}",
+                f"Global graph context: {repo_summary.global_context or 'n/a'}",
                 "",
                 f"Question: {question}",
                 "",
                 "Retrieved repository context:",
                 "\n\n".join(context_blocks),
                 "",
-                "Answer the question using only this context. If you are missing evidence, say exactly what is missing.",
+                "Use the graph context only to understand repo-wide structure. Support your answer with the retrieved chunks, but do not append bracketed file citations in the answer body because the UI shows sources separately. Respond in short plain prose paragraphs only, with no code formatting or markdown lists. If you are missing evidence, say exactly what is missing.",
             ]
         )
 

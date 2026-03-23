@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -82,4 +83,22 @@ class RepoQAGraph:
             )
         except Exception:  # noqa: BLE001
             final_answer = draft_answer
-        return {"answer": final_answer or draft_answer}
+        answer = self._normalize_answer_text(final_answer or draft_answer)
+        return {"answer": answer or draft_answer}
+
+    def _normalize_answer_text(self, answer: str) -> str:
+        cleaned = answer.replace("```", "")
+        cleaned = cleaned.replace("**", "")
+        cleaned = cleaned.replace("`", "")
+        cleaned = re.sub(r"\[[^\]]*:[0-9]+(?:-[0-9]+)?\]", "", cleaned)
+        cleaned = re.sub(
+            r"\b[\w./-]+\.(?:py|js|ts|tsx|jsx|json|md|ya?ml)\s+lines?\s+\d+(?:-\d+)?\]?",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"(?m)^\s*[-*]\s+", "", cleaned)
+        cleaned = re.sub(r"(?m)^\s*\d+\.\s+", "", cleaned)
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()

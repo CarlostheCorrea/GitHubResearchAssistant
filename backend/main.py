@@ -16,11 +16,13 @@ from backend.embedder import OpenAIEmbedder
 from backend.file_filter import FileFilter
 from backend.github_loader import GitHubLoader
 from backend.judge_service import LLMJudgeService
+from backend.knowledge_graph import KnowledgeGraphService
 from backend.models import (
     AnalyzeRepoResponse,
     AskRequest,
     AskResponse,
     ClearAllCacheResponse,
+    DeleteRepoCacheResponse,
     HealthResponse,
     RepoManifest,
     RepoSummary,
@@ -50,6 +52,7 @@ class ResearchAssistantService:
         self.embedder = OpenAIEmbedder(settings)
         self.vector_store = ChromaVectorStore(settings)
         self.retriever = HybridRetriever(settings, self.embedder, self.vector_store)
+        self.knowledge_graph = KnowledgeGraphService()
         self.repo_summarizer = RepoSummarizer(settings)
         self.qa_service = QAService(settings)
         self.judge_service = LLMJudgeService(settings)
@@ -59,6 +62,8 @@ class ResearchAssistantService:
         repo = self.loader.resolve_repo(repo_url)
         manifest = self._load_manifest(repo.repo_id)
         if manifest and self.vector_store.repo_has_data(repo.repo_id):
+            manifest.summary = self.knowledge_graph.ensure_summary_global_context(manifest.summary)
+            self._save_manifest(manifest)
             logger.info("Using cached repo analysis for %s", repo.repo_name)
             return AnalyzeRepoResponse(
                 status="ready",
@@ -81,7 +86,16 @@ class ResearchAssistantService:
 
         embeddings = self.embedder.embed_chunks(chunks)
         self.vector_store.upsert_chunks(repo.repo_id, chunks, embeddings)
-        summary = self.repo_summarizer.summarize(repo, files, chunks)
+        graph_snapshot = self.knowledge_graph.build_snapshot(repo, files, chunks)
+        summary = self.repo_summarizer.summarize(
+            repo,
+            files,
+            chunks,
+            global_context=graph_snapshot.global_context,
+            critical_paths=graph_snapshot.critical_paths,
+            dependency_links=graph_snapshot.dependency_links,
+            graph_hubs=graph_snapshot.graph_hubs,
+        )
 
         manifest = RepoManifest(
             repo=repo,
@@ -132,6 +146,30 @@ class ResearchAssistantService:
         analyze_response = self.analyze_repo(repo_url)
         return analyze_response.repo_summary
 
+    def clear_repo_cache(self, repo_url: str) -> DeleteRepoCacheResponse:
+        repo = self.loader.resolve_repo(repo_url)
+        manifest_path = self._manifest_path(repo.repo_id)
+        deleted_manifest = False
+        if manifest_path.exists():
+            manifest_path.unlink()
+            deleted_manifest = True
+
+        deleted_vector_index = self.vector_store.delete_repo(repo.repo_id)
+        cache_deleted = deleted_manifest or deleted_vector_index
+        if cache_deleted:
+            message = f"Cleared cached data for {repo.repo_name}."
+        else:
+            message = f"No cached data was found for {repo.repo_name}."
+        return DeleteRepoCacheResponse(
+            status="cleared" if cache_deleted else "not_found",
+            repo_url=repo.normalized_repo_url,
+            repo_name=repo.repo_name,
+            cache_deleted=cache_deleted,
+            deleted_manifest=deleted_manifest,
+            deleted_vector_index=deleted_vector_index,
+            message=message,
+        )
+
     def clear_all_cache(self) -> ClearAllCacheResponse:
         deleted_manifests = 0
         for manifest_path in self.settings.manifest_dir.glob("*.json"):
@@ -140,7 +178,10 @@ class ResearchAssistantService:
 
         deleted_vector_indexes = self.vector_store.delete_all()
         message = (
-            f"Cleared all cached repository data ({deleted_manifests} manifests, {deleted_vector_indexes} vector indexes)."
+            (
+                f"Cleared all cached repository data "
+                f"({deleted_manifests} manifests, {deleted_vector_indexes} vector indexes)."
+            )
             if deleted_manifests or deleted_vector_indexes
             else "No cached repository data was found."
         )
@@ -218,6 +259,14 @@ async def repo_summary(repo_url: str = Query(..., min_length=10)) -> RepoSummary
 async def clear_all_cache() -> ClearAllCacheResponse:
     try:
         return service.clear_all_cache()
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.delete("/cache/repo", response_model=DeleteRepoCacheResponse)
+async def clear_repo_cache(repo_url: str = Query(..., min_length=10)) -> DeleteRepoCacheResponse:
+    try:
+        return service.clear_repo_cache(repo_url)
     except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc) from exc
 

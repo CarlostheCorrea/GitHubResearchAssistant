@@ -35,6 +35,10 @@ class RepoSummarizer:
         repo: RepoDescriptor,
         files: list[RepoFile],
         chunks: list[ChunkRecord],
+        global_context: str = "",
+        critical_paths: list[list[str]] | None = None,
+        dependency_links: list[list[str]] | None = None,
+        graph_hubs: list[str] | None = None,
     ) -> RepoSummary:
         language_counts = Counter(file.language for file in files)
         detected_languages = [language for language, _count in language_counts.most_common()]
@@ -85,6 +89,10 @@ class RepoSummarizer:
             language_distribution=dict(language_counts),
             key_files=key_files,
             high_level_summary=high_level_summary,
+            global_context=global_context,
+            critical_paths=critical_paths or [],
+            dependency_links=dependency_links or [],
+            graph_hubs=graph_hubs or [],
             readme_excerpt=readme_excerpt,
             probable_entry_points=probable_entry_points,
             probable_training_files=probable_training_files,

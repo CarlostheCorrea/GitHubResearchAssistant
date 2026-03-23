@@ -1,6 +1,6 @@
 # AI GitHub Research Assistant
 
-AI GitHub Research Assistant is a production-style MVP for understanding public GitHub repositories with code-aware retrieval-augmented generation. A user pastes a repository URL, the system ingests the repo, builds a local vector index over structured code chunks, uses hybrid search to retrieve the most relevant evidence, and answers repository questions with grounded evidence, citations, and source snippets.
+AI GitHub Research Assistant is a production-style MVP for understanding public GitHub repositories with code-aware retrieval-augmented generation. A user pastes a repository URL, the system ingests the repo, builds a local vector index over structured code chunks, uses hybrid search to retrieve the most relevant evidence, and answers repository questions with grounded evidence, citations, and source snippets. It also supports GraphRAG-style global context through a local repository knowledge graph.
 
 ## Program Summary
 
@@ -10,7 +10,7 @@ The goal is not just to answer questions, but to answer them in a way that is in
 
 ## Architecture Summary
 
-The application is split into a FastAPI backend and a lightweight static frontend. The backend handles GitHub ingestion, filtering, chunking, embedding, hybrid retrieval, repository summarization, question answering, and internal judge-based revision. The frontend provides a local interface for analyzing a repo, viewing the repository overview, asking questions, and inspecting cited snippets.
+The application is split into a FastAPI backend and a lightweight static frontend. The backend handles GitHub ingestion, filtering, chunking, embedding, hybrid retrieval, repository summarization, optional knowledge-graph construction, question answering, and internal judge-based revision. The frontend provides a local interface for analyzing a repo, viewing the repository overview, asking questions, and inspecting cited snippets.
 
 At a high level, the architecture works like this:
 
@@ -18,9 +18,10 @@ At a high level, the architecture works like this:
 2. The backend resolves the GitHub repo, fetches supported files, and filters out irrelevant content.
 3. The chunking layer converts files into structured retrieval units.
 4. The embedding layer creates vectors for those chunks and stores them in Chroma.
-5. The retriever uses hybrid search to find the most relevant chunks for a question.
-6. The QA layer drafts an answer from retrieved evidence only.
-7. An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
+5. The backend derives repository-wide graph relationships and a GraphRAG global context summary.
+6. The retriever uses hybrid search to find the most relevant chunks for a question.
+7. The QA layer drafts an answer using retrieved evidence plus the global graph context as structural guidance.
+8. An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
 
 Project layout:
 
@@ -41,6 +42,7 @@ backend/
   embedder.py
   vector_store.py
   retriever.py
+  knowledge_graph.py
   repo_summarizer.py
   judge_service.py
   qa_service.py
@@ -62,6 +64,12 @@ README.md
 The core of the project is repository-specific RAG. During analysis, the backend ingests the repository and builds a retrieval index over code, configuration, and documentation chunks. During question answering, the app retrieves only the most relevant repository evidence and passes that context to the LLM. This keeps the answer grounded in real repo content and avoids the much weaker pattern of prompting the model with whole files or entire repositories.
 
 The retrieval pipeline is hybrid rather than purely semantic. It combines embedding similarity with lightweight boosting for file paths, symbol names, and important repository terms such as `train`, `inference`, `config`, `dataset`, `main`, and `endpoint`. That helps the system find the right code even when the user’s phrasing does not exactly match the source text.
+
+### GraphRAG And Global Context
+
+The project now builds a repository-wide knowledge graph from the same analyzed files and chunks used by the RAG pipeline. This graph captures structural entities such as repositories, files, symbols, languages, and inferred file-level dependencies. From that graph, the backend produces a global context summary that helps the answering layer reason about relationships across the entire repository instead of only the top retrieved chunks.
+
+This GraphRAG-style layer is designed to be additive. The app builds the graph locally from the same repository files and chunks already used by the RAG pipeline, then turns that structure into global context for the answer layer and the repository overview UI.
 
 ### Chunking
 
@@ -174,16 +182,18 @@ GITHUB_TOKEN=
 macOS / Linux:
 
 ```bash
-uvicorn backend.main:app --reload
+python3 -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir frontend
 ```
 
 Windows PowerShell or Command Prompt:
 
 ```powershell
-py -m uvicorn backend.main:app --reload
+py -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir frontend
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+If you keep your virtual environment inside the project as `.venv`, avoid running `uvicorn --reload` without `--reload-dir`. Otherwise the file watcher can detect package changes inside `.venv/site-packages` and repeatedly restart the server even when your app code has not changed.
 
 ### 5. Optional environment variables
 
@@ -252,6 +262,7 @@ Use the `Clear All Cache` button if you want to remove cached repository manifes
 - `POST /ask`
 - `GET /repo-summary`
 - `DELETE /cache`
+- `DELETE /cache/repo`
 
 Example:
 

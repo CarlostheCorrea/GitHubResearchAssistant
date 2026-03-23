@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI GitHub Research Assistant</title>
-    <link rel="stylesheet" href="/frontend/styles.css" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=3" />
   </head>
   <body>
     <div class="page-shell">
@@ -81,6 +81,12 @@
             <div class="summary-card span-2">
               <p class="summary-label">High-level summary</p>
               <div id="summary-text" class="summary-text"></div>
+            </div>
+            <div class="summary-card span-2">
+              <p class="summary-label">Global context (GraphRAG)</p>
+              <div id="summary-global-context" class="summary-text summary-text-direct graph-context-shell">
+                Repository-wide graph context will appear here after analysis.
+              </div>
             </div>
             <div class="summary-card">
               <p class="summary-label">Repository</p>
@@ -159,7 +165,7 @@
             Answers will appear here with retrieved evidence and cited source snippets.
           </div>
           <div id="answer-content" class="hidden">
-            <pre id="answer-text" class="answer-text"></pre>
+            <div id="answer-text" class="answer-text"></div>
           </div>
         </section>
 
@@ -178,6 +184,6 @@
       </main>
     </div>
 
-    <script src="/frontend/app.js" defer></script>
+    <script src="/frontend/app.js?v=3" defer></script>
   </body>
 </html>
