@@ -1,16 +1,16 @@
 # AI GitHub Research Assistant
 
-AI GitHub Research Assistant is a production-style MVP for understanding public GitHub repositories with code-aware retrieval-augmented generation. A user pastes a repository URL, the system ingests the repo, builds a local vector index over structured code chunks, and answers repository questions with grounded evidence, citations, and source snippets.
+AI GitHub Research Assistant is a production-style MVP for understanding public GitHub repositories with code-aware retrieval-augmented generation. A user pastes a repository URL, the system ingests the repo, builds a local vector index over structured code chunks, uses hybrid search to retrieve the most relevant evidence, and answers repository questions with grounded evidence, citations, and source snippets.
 
 ## Program Summary
 
-This project is designed to help a user quickly understand an unfamiliar codebase. Instead of sending entire files or the whole repository into an LLM, it first fetches the repository, filters relevant files, chunks the code intelligently, embeds those chunks, and stores them in a local Chroma vector index. When the user asks a question, the app retrieves the most relevant chunks, generates an evidence-based answer, and shows the supporting snippets in the UI.
+This project is designed to help a user quickly understand an unfamiliar codebase. Instead of sending entire files or the whole repository into an LLM, it first fetches the repository, filters relevant files, chunks the code intelligently, embeds those chunks, and stores them in a local Chroma vector index. When the user asks a question, the app uses hybrid search to retrieve the most relevant chunks, generates an evidence-based answer, and shows the supporting snippets in the UI.
 
 The goal is not just to answer questions, but to answer them in a way that is inspectable. The app highlights where the answer came from, which files were used, and which parts of the repository appear to be the key architectural areas such as entry points, configuration, data loading, and inference or training logic.
 
 ## Architecture Summary
 
-The application is split into a FastAPI backend and a lightweight static frontend. The backend handles GitHub ingestion, filtering, chunking, embedding, vector search, retrieval, repository summarization, question answering, and internal judge-based revision. The frontend provides a local interface for analyzing a repo, viewing the repository overview, asking questions, and inspecting cited snippets.
+The application is split into a FastAPI backend and a lightweight static frontend. The backend handles GitHub ingestion, filtering, chunking, embedding, hybrid retrieval, repository summarization, question answering, and internal judge-based revision. The frontend provides a local interface for analyzing a repo, viewing the repository overview, asking questions, and inspecting cited snippets.
 
 At a high level, the architecture works like this:
 
@@ -18,7 +18,7 @@ At a high level, the architecture works like this:
 2. The backend resolves the GitHub repo, fetches supported files, and filters out irrelevant content.
 3. The chunking layer converts files into structured retrieval units.
 4. The embedding layer creates vectors for those chunks and stores them in Chroma.
-5. The retriever finds the most relevant chunks for a question.
+5. The retriever uses hybrid search to find the most relevant chunks for a question.
 6. The QA layer drafts an answer from retrieved evidence only.
 7. An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
 
