@@ -1,0 +1,34 @@
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local app data
+data/cache/*
+!data/cache/.gitkeep
+*.sqlite
+*.sqlite3
+*.db
+
+# Frontend/build artifacts
+node_modules/
+dist/
+build/
+coverage/
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
