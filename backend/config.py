@@ -21,9 +21,8 @@ class Settings(BaseSettings):
     github_token: str | None = None
 
     request_timeout_seconds: int = 30
+    clone_timeout_seconds: int = 300
     max_file_bytes: int = 250_000
-    max_total_repo_bytes: int = 6_000_000
-    max_files_per_repo: int = 250
     embedding_batch_size: int = 32
     vector_query_k: int = 16
     answer_context_k: int = 6

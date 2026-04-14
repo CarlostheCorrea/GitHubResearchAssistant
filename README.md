@@ -14,18 +14,18 @@ The application is split into a FastAPI backend and a lightweight static fronten
 
 At a high level, the architecture works like this:
 
-1. The frontend sends a repository URL to the backend.
-2. The backend resolves the GitHub repo, fetches supported files, and filters out irrelevant content.
-3. The chunking layer converts files into structured retrieval units.
-4. The embedding layer creates vectors for those chunks and stores them in Chroma.
-5. The backend derives repository-wide graph relationships and a GraphRAG global context summary.
-6. The retriever uses hybrid search to find the most relevant chunks for a question.
-7. The QA layer drafts an answer using retrieved evidence plus the global graph context as structural guidance.
-8. An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
+1.  The frontend sends a repository URL to the backend.
+2.  The backend resolves the GitHub repo, fetches supported files, and filters out irrelevant content.
+3.  The chunking layer converts files into structured retrieval units.
+4.  The embedding layer creates vectors for those chunks and stores them in Chroma.
+5.  The backend derives repository-wide graph relationships and a GraphRAG global context summary.
+6.  The retriever uses hybrid search to find the most relevant chunks for a question.
+7.  The QA layer drafts an answer using retrieved evidence plus the global graph context as structural guidance.
+8.  An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
 
 Project layout:
 
-```text
+``` text
 frontend/
   index.html
   styles.css
@@ -99,7 +99,7 @@ The application code is designed to run on macOS, Linux, and Windows. The main c
 
 If you are starting from GitHub, clone the repository and move into the project folder first.
 
-```bash
+``` bash
 git clone https://github.com/CarlostheCorrea/GitHubResearchAssistant.git
 cd GitHubResearchAssistant
 ```
@@ -112,7 +112,7 @@ Create and activate a virtual environment first, then install dependencies.
 
 macOS / Linux:
 
-```bash
+``` bash
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
@@ -121,7 +121,7 @@ python3 -m pip install -r requirements.txt
 
 Windows PowerShell:
 
-```powershell
+``` powershell
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 py -m pip install --upgrade pip
@@ -130,7 +130,7 @@ py -m pip install -r requirements.txt
 
 Windows Command Prompt:
 
-```bash
+``` bash
 py -m venv .venv
 .venv\Scripts\activate.bat
 py -m pip install --upgrade pip
@@ -141,36 +141,36 @@ py -m pip install -r requirements.txt
 
 macOS / Linux:
 
-```bash
+``` bash
 cp .env.example .env
 ```
 
 Windows PowerShell:
 
-```powershell
+``` powershell
 Copy-Item .env.example .env
 ```
 
 Windows Command Prompt:
 
-```bat
+``` bat
 copy .env.example .env
 ```
 
 Then add your keys to `.env`:
 
-- `OPENAI_API_KEY` is required
-- `GITHUB_TOKEN` is recommended but not required to use the project
+-   `OPENAI_API_KEY` is required
+-   `GITHUB_TOKEN` is recommended but not required to use the project
 
 The app can analyze public repositories without a `GITHUB_TOKEN`, but adding one improves GitHub API reliability. The main benefits are:
 
-- higher GitHub API rate limits
-- fewer ingestion failures when testing multiple repositories
-- more reliable fetching of repository metadata, trees, and file contents
+-   higher GitHub API rate limits
+-   fewer ingestion failures when testing multiple repositories
+-   more reliable fetching of repository metadata, trees, and file contents
 
 Example:
 
-```env
+``` env
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_CHAT_MODEL=gpt-4.1-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
@@ -181,24 +181,24 @@ GITHUB_TOKEN=
 
 macOS / Linux:
 
-```bash
+``` bash
 python3 -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir frontend
 ```
 
 Windows PowerShell or Command Prompt:
 
-```powershell
+``` powershell
 py -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir frontend
 ```
 
-Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+Then open <http://127.0.0.1:8000>.
 
 If you keep your virtual environment inside the project as `.venv`, avoid running `uvicorn --reload` without `--reload-dir`. Otherwise the file watcher can detect package changes inside `.venv/site-packages` and repeatedly restart the server even when your app code has not changed.
 
 ### 5. Optional environment variables
 
 | Variable | Required | Purpose |
-| --- | --- | --- |
+|------------------------|------------------------|------------------------|
 | `OPENAI_API_KEY` | Yes | OpenAI access for embeddings, answer generation, repo summary generation, and judge revision |
 | `OPENAI_CHAT_MODEL` | No | Chat model used for repo summaries, answers, and judge revision |
 | `OPENAI_EMBEDDING_MODEL` | No | Embedding model used for repo chunks and query embeddings |
@@ -218,43 +218,40 @@ Open the app in your browser, paste a public GitHub repository URL into the repo
 
 The backend will fetch the repository, filter supported files, chunk the contents, generate embeddings, and build a local Chroma index. Once analysis completes, the Repository Overview section will show the repo summary, language mix, key files, likely entry points, configuration files, and other surfaced repository areas.
 
-<img width="1026" height="447" alt="Screenshot 2026-03-23 at 5 11 42 PM" src="https://github.com/user-attachments/assets/504ea4ad-321f-4458-b4d4-01dba184b2d5" />
+<img src="https://github.com/user-attachments/assets/504ea4ad-321f-4458-b4d4-01dba184b2d5" alt="Screenshot 2026-03-23 at 5 11 42 PM" width="1026" height="447"/>
 
-<img width="753" height="586" alt="Screenshot 2026-03-23 at 5 12 00 PM" src="https://github.com/user-attachments/assets/88a358f7-4980-42d0-bf84-da1dba3cbaf6" />
+<img src="https://github.com/user-attachments/assets/88a358f7-4980-42d0-bf84-da1dba3cbaf6" alt="Screenshot 2026-03-23 at 5 12 00 PM" width="753" height="586"/>
 
-<img width="760" height="688" alt="Screenshot 2026-03-23 at 5 12 14 PM" src="https://github.com/user-attachments/assets/98e7b6c5-6a22-49eb-8c9d-941884b5e701" />
-
+<img src="https://github.com/user-attachments/assets/98e7b6c5-6a22-49eb-8c9d-941884b5e701" alt="Screenshot 2026-03-23 at 5 12 14 PM" width="760" height="688"/>
 
 ### 2. Ask repository questions
 
 After analysis completes, use the question box in Step 3 to ask natural-language questions about the repository. Good example questions include:
 
-- How is data loaded?
-- Where is the inference code?
-- What are the main components of this repository?
-- Where is the configuration defined?
-- How does this repo train the model?
-- What files look like the entry points?
+-   How is data loaded?
+-   Where is the inference code?
+-   What are the main components of this repository?
+-   Where is the configuration defined?
+-   How does this repo train the model?
+-   What files look like the entry points?
 
 When you submit a question, the system retrieves the most relevant chunks, drafts an answer, internally reviews that answer with the judge pass, and then returns the final grounded answer.
 
-<img width="1002" height="293" alt="Screenshot 2026-03-23 at 5 12 43 PM" src="https://github.com/user-attachments/assets/c7eeb89b-8c2c-4ce1-b498-58ecf2cc45eb" />
-
+<img src="https://github.com/user-attachments/assets/c7eeb89b-8c2c-4ce1-b498-58ecf2cc45eb" alt="Screenshot 2026-03-23 at 5 12 43 PM" width="1002" height="293"/>
 
 ### Inspect sources
 
 The right-hand evidence panel shows the retrieved source snippets used to answer the question. Each source card includes:
 
-- file path
-- line range when available
-- chunk type
-- snippet preview
-- retrieval score
+-   file path
+-   line range when available
+-   chunk type
+-   snippet preview
+-   retrieval score
 
 Use this panel to verify where the answer came from and to inspect the underlying code directly.
 
-<img width="987" height="510" alt="Screenshot 2026-03-23 at 5 13 01 PM" src="https://github.com/user-attachments/assets/939c16cc-8482-4f9a-af5a-2ae46b13b636" />
-
+<img src="https://github.com/user-attachments/assets/939c16cc-8482-4f9a-af5a-2ae46b13b636" alt="Screenshot 2026-03-23 at 5 13 01 PM" width="987" height="510"/>
 
 ### Clear cached data
 
@@ -262,16 +259,16 @@ Use the `Clear All Cache` button if you want to remove cached repository manifes
 
 ## API Endpoints
 
-- `GET /health`
-- `POST /analyze-repo`
-- `POST /ask`
-- `GET /repo-summary`
-- `DELETE /cache`
-- `DELETE /cache/repo`
+-   `GET /health`
+-   `POST /analyze-repo`
+-   `POST /ask`
+-   `GET /repo-summary`
+-   `DELETE /cache`
+-   `DELETE /cache/repo`
 
 Example:
 
-```bash
+``` bash
 curl -X POST http://127.0.0.1:8000/analyze-repo \
   -H "Content-Type: application/json" \
   -d '{"repo_url":"https://github.com/pallets/flask"}'
@@ -279,29 +276,29 @@ curl -X POST http://127.0.0.1:8000/analyze-repo \
 
 ## Example Questions
 
-- How does this repo train the model?
-- Where is the inference code?
-- How is data loaded?
-- Where is the configuration defined?
-- What are the main components of this repository?
-- What files look like the entry points?
-- Which modules are most relevant to API serving?
+-   How does this repo train the model?
+-   Where is the inference code?
+-   How is data loaded?
+-   Where is the configuration defined?
+-   What are the main components of this repository?
+-   What files look like the entry points?
+-   Which modules are most relevant to API serving?
 
 ## Error Handling
 
 The backend includes explicit handling for:
 
-- invalid GitHub URLs
-- missing repositories or invalid branches
-- GitHub API rate limits
-- empty or unsupported repos
-- missing OpenAI API key
-- unexpected runtime failures
+-   invalid GitHub URLs
+-   missing repositories or invalid branches
+-   GitHub API rate limits
+-   empty or unsupported repos
+-   missing OpenAI API key
+-   unexpected runtime failures
 
 ## Future Improvements
 
-- Add deeper parser support for more languages beyond Python and JS/TS.
-- Add background indexing for larger repositories.
-- Add stronger retrieval evaluation and benchmark coverage.
-- Improve refresh and invalidation behavior for cached repo analyses.
-- Expand config parsing for YAML, TOML, and config-heavy repos.
+-   Add deeper parser support for more languages beyond Python and JS/TS.
+-   Add background indexing for larger repositories.
+-   Add stronger retrieval evaluation and benchmark coverage.
+-   Improve refresh and invalidation behavior for cached repo analyses.
+-   Expand config parsing for YAML, TOML, and config-heavy repos.

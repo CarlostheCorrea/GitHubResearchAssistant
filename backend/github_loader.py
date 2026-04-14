@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import base64
 import logging
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import requests
 
@@ -54,40 +56,62 @@ class GitHubLoader:
         repo: RepoDescriptor,
         file_filter: FileFilter,
     ) -> tuple[list[RepoFile], dict[str, int]]:
-        tree_data = self._request_json(
-            f"https://api.github.com/repos/{repo.owner}/{repo.repo}/git/trees/{quote(repo.branch, safe='')}",
-            params={"recursive": 1},
+        clone_url = self._build_clone_url(repo.owner, repo.repo)
+        clone_path = Path(tempfile.mkdtemp(prefix=f"ghra_{repo.repo_id}_"))
+
+        try:
+            self._clone_repo(clone_url, repo.branch, clone_path, repo.repo_name)
+            return self._walk_and_load(repo, file_filter, clone_path)
+        finally:
+            shutil.rmtree(clone_path, ignore_errors=True)
+            logger.info("Cleaned up clone directory for %s", repo.repo_name)
+
+    def _clone_repo(self, clone_url: str, branch: str, target: Path, repo_name: str) -> None:
+        logger.info("Cloning %s (branch: %s)", repo_name, branch)
+        cmd = [
+            "git", "clone",
+            "--depth=1",
+            "--branch", branch,
+            "--single-branch",
+            clone_url,
+            str(target),
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=self.settings.clone_timeout_seconds,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git clone failed for {repo_name}: {result.stderr.strip()[:300]}"
+            )
 
-        if tree_data.get("truncated"):
-            logger.warning("GitHub tree response was truncated for %s", repo.repo_name)
-
+    def _walk_and_load(
+        self,
+        repo: RepoDescriptor,
+        file_filter: FileFilter,
+        clone_path: Path,
+    ) -> tuple[list[RepoFile], dict[str, int]]:
         files: list[RepoFile] = []
         files_seen = 0
         skipped_files = 0
-        total_bytes = 0
 
-        for item in tree_data.get("tree", []):
-            if item.get("type") != "blob":
+        for abs_path in sorted(clone_path.rglob("*")):
+            if not abs_path.is_file():
                 continue
 
+            rel_path = abs_path.relative_to(clone_path)
+            path_str = rel_path.as_posix()
+            size = abs_path.stat().st_size
             files_seen += 1
-            path = item["path"]
-            size = item.get("size") or 0
-            should_ingest, _reason = file_filter.should_ingest(path, size)
+
+            should_ingest, _reason = file_filter.should_ingest(path_str, size)
             if not should_ingest:
                 skipped_files += 1
                 continue
 
-            if len(files) >= self.settings.max_files_per_repo:
-                skipped_files += 1
-                continue
-
-            if total_bytes + size > self.settings.max_total_repo_bytes:
-                skipped_files += 1
-                continue
-
-            file_bytes = self._fetch_blob_bytes(item["url"])
+            file_bytes = abs_path.read_bytes()
             if seems_binary(file_bytes):
                 skipped_files += 1
                 continue
@@ -97,20 +121,17 @@ class GitHubLoader:
                 skipped_files += 1
                 continue
 
-            language = detect_language(path)
-            role = file_filter.classify_role(path, text)
+            language = detect_language(path_str)
+            role = file_filter.classify_role(path_str, text)
             files.append(
                 RepoFile(
-                    path=path,
+                    path=path_str,
                     size=size,
-                    sha=item.get("sha"),
-                    blob_url=item.get("url"),
                     language=language,
                     role=role,
                     content=text,
                 )
             )
-            total_bytes += size
 
         stats = {
             "files_seen": files_seen,
@@ -126,18 +147,15 @@ class GitHubLoader:
         )
         return files, stats
 
+    def _build_clone_url(self, owner: str, repo: str) -> str:
+        if self.settings.github_token:
+            return f"https://{self.settings.github_token}@github.com/{owner}/{repo}.git"
+        return f"https://github.com/{owner}/{repo}.git"
+
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         response = self.session.get(url, params=params, timeout=self.settings.request_timeout_seconds)
         self._raise_for_status(response)
         return response.json()
-
-    def _fetch_blob_bytes(self, blob_url: str) -> bytes:
-        blob_data = self._request_json(blob_url)
-        encoding = blob_data.get("encoding")
-        content = blob_data.get("content", "")
-        if encoding == "base64":
-            return base64.b64decode(content)
-        return content.encode("utf-8")
 
     def _raise_for_status(self, response: requests.Response) -> None:
         if response.status_code < 400:
