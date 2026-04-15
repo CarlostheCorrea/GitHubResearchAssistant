@@ -6,7 +6,12 @@ from backend.models import ChunkRecord, RepoDescriptor, RepoFile
 from backend.parsers import (
     SectionSpan,
     build_file_summary,
+    extract_cpp_sections,
+    extract_go_sections,
+    extract_java_sections,
     extract_python_sections,
+    extract_ruby_sections,
+    extract_rust_sections,
     split_code_sections,
     split_markdown_sections,
     split_structured_sections,
@@ -72,6 +77,26 @@ class CodeAwareChunker:
             return split_structured_sections(repo_file.path, repo_file.content)
         if repo_file.language in {"javascript", "typescript", "tsx"}:
             return split_code_sections(repo_file.content)
+        if repo_file.language == "go":
+            sections = extract_go_sections(repo_file.content)
+            if sections:
+                return sections
+        if repo_file.language == "rust":
+            sections = extract_rust_sections(repo_file.content)
+            if sections:
+                return sections
+        if repo_file.language == "java":
+            sections = extract_java_sections(repo_file.content)
+            if sections:
+                return sections
+        if repo_file.language in {"cpp", "c"}:
+            sections = extract_cpp_sections(repo_file.content)
+            if sections:
+                return sections
+        if repo_file.language == "ruby":
+            sections = extract_ruby_sections(repo_file.content)
+            if sections:
+                return sections
         return split_text_sections(repo_file.content)
 
     def _section_to_chunk(

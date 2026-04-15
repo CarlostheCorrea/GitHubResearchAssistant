@@ -19,6 +19,18 @@ EXTENSION_LANGUAGE_MAP = {
     ".yaml": "yaml",
     ".yml": "yaml",
     ".toml": "toml",
+    # Systems / compiled languages
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".c": "c",
+    ".h": "c",
+    # Scripting
+    ".rb": "ruby",
 }
 
 

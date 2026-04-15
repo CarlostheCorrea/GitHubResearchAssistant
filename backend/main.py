@@ -11,7 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIConnectionError, AuthenticationError, BadRequestError, RateLimitError
 
 from backend.chunker import CodeAwareChunker
+from backend.compare_service import BranchCompareService
 from backend.config import Settings, get_settings
+from backend.onboarding_service import OnboardingService
 from backend.embedder import OpenAIEmbedder
 from backend.file_filter import FileFilter
 from backend.github_loader import GitHubLoader
@@ -19,20 +21,34 @@ from backend.judge_service import LLMJudgeService
 from backend.knowledge_graph import KnowledgeGraphService
 from backend.models import (
     AnalyzeRepoResponse,
+    AskCompareRequest,
+    AskCompareResponse,
+    AskVersionCompareRequest,
+    AskVersionCompareResponse,
     AskRequest,
     AskResponse,
+    BranchListResponse,
+    ChunkRecord,
     ClearAllCacheResponse,
+    CompareBranchesRequest,
+    CompareBranchesResponse,
+    CompareVersionsRequest,
+    CompareVersionsResponse,
     DeleteRepoCacheResponse,
     HealthResponse,
+    HistoryResponse,
+    OnboardingResponse,
+    RepoDescriptor,
     RepoManifest,
     RepoSummary,
     RepoURLRequest,
+    VersionListResponse,
 )
 from backend.qa_graph import RepoQAGraph
 from backend.qa_service import QAService
 from backend.repo_summarizer import RepoSummarizer
 from backend.retriever import HybridRetriever
-from backend.utils import setup_logging, utc_now
+from backend.utils import build_chunk_id, detect_language, setup_logging, utc_now
 from backend.vector_store import ChromaVectorStore
 
 
@@ -57,26 +73,53 @@ class ResearchAssistantService:
         self.qa_service = QAService(settings)
         self.judge_service = LLMJudgeService(settings)
         self.qa_graph = RepoQAGraph(self.retriever, self.qa_service, self.judge_service)
+        self.compare_service = BranchCompareService(settings, self.loader)
+        self.onboarding_service = OnboardingService(settings)
 
     def analyze_repo(self, repo_url: str) -> AnalyzeRepoResponse:
         repo = self.loader.resolve_repo(repo_url)
         manifest = self._load_manifest(repo.repo_id)
+        previous_sha: str | None = None
+
+        # Fast-path: check if cached and unchanged via a single lightweight API call
         if manifest and self.vector_store.repo_has_data(repo.repo_id):
-            manifest.summary = self.knowledge_graph.ensure_summary_global_context(manifest.summary)
-            self._save_manifest(manifest)
-            logger.info("Using cached repo analysis for %s", repo.repo_name)
-            return AnalyzeRepoResponse(
-                status="ready",
-                cached=True,
-                files_seen=manifest.files_seen,
-                files_indexed=manifest.files_indexed,
-                skipped_files=manifest.skipped_files,
-                chunks_created=manifest.chunks_created,
-                message="Loaded cached ingestion for this repository.",
-                repo_summary=manifest.summary,
+            try:
+                current_sha = self.loader.get_head_sha(repo)
+            except Exception:
+                current_sha = None
+
+            if current_sha and current_sha == manifest.head_commit_sha:
+                manifest.summary = self.knowledge_graph.ensure_summary_global_context(manifest.summary)
+                self._save_manifest(manifest)
+                logger.info("Using cached repo analysis for %s (SHA unchanged)", repo.repo_name)
+                return AnalyzeRepoResponse(
+                    status="ready",
+                    cached=True,
+                    files_seen=manifest.files_seen,
+                    files_indexed=manifest.files_indexed,
+                    skipped_files=manifest.skipped_files,
+                    chunks_created=manifest.chunks_created,
+                    message="Loaded cached ingestion — no new commits detected.",
+                    repo_summary=manifest.summary,
+                    head_commit_sha=manifest.head_commit_sha,
+                    first_commit=manifest.first_commit,
+                    changes_since_previous=None,
+                    commit_history=manifest.commit_history,
+                    activity_summary=manifest.activity_summary,
+                )
+
+            # SHA changed — record previous SHA for diff, then clear stale vectors
+            previous_sha = manifest.head_commit_sha
+            self.vector_store.delete_repo(repo.repo_id)
+            logger.info(
+                "New commits detected for %s (%s → re-indexing)",
+                repo.repo_name,
+                (previous_sha or "none")[:7],
             )
 
-        files, stats = self.loader.load_repository_files(repo, self.file_filter)
+        files, stats, head_sha, first_commit, commit_history, changes, file_diffs = (
+            self.loader.load_repository_files(repo, self.file_filter, previous_sha=previous_sha)
+        )
         if not files:
             raise ValueError("No supported text/code files were found in the repository.")
 
@@ -86,6 +129,20 @@ class ResearchAssistantService:
 
         embeddings = self.embedder.embed_chunks(chunks)
         self.vector_store.upsert_chunks(repo.repo_id, chunks, embeddings)
+
+        # Embed commit history so QA can answer questions about commits/authors/timeline
+        if commit_history:
+            history_chunk = self._create_history_chunk(repo, commit_history, head_sha)
+            history_embeddings = self.embedder.embed_chunks([history_chunk])
+            self.vector_store.upsert_chunks(repo.repo_id, [history_chunk], history_embeddings)
+
+        # Store diff chunks so the QA system can answer "what changed?"
+        if file_diffs:
+            diff_chunks = self._create_diff_chunks(repo, file_diffs, previous_sha or "", head_sha)
+            if diff_chunks:
+                diff_embeddings = self.embedder.embed_chunks(diff_chunks)
+                self.vector_store.upsert_chunks(repo.repo_id, diff_chunks, diff_embeddings)
+
         graph_snapshot = self.knowledge_graph.build_snapshot(repo, files, chunks)
         summary = self.repo_summarizer.summarize(
             repo,
@@ -97,6 +154,16 @@ class ResearchAssistantService:
             graph_hubs=graph_snapshot.graph_hubs,
         )
 
+        # Batch-generate per-commit summaries and the overall activity summary in parallel steps
+        commit_summaries = self.qa_service.summarize_commits(repo.repo_name, commit_history)
+        if commit_summaries:
+            commit_history = [
+                c.model_copy(update={"summary": commit_summaries.get(c.short_sha, "")})
+                for c in commit_history
+            ]
+
+        activity_summary = self.qa_service.summarize_activity(repo.repo_name, commit_history)
+
         manifest = RepoManifest(
             repo=repo,
             summary=summary,
@@ -106,14 +173,21 @@ class ResearchAssistantService:
             chunks_created=len(chunks),
             created_at=utc_now(),
             updated_at=utc_now(),
+            head_commit_sha=head_sha,
+            first_commit=first_commit,
+            previous_head_sha=previous_sha,
+            commit_history=commit_history,
+            changes_since_previous=changes,
+            activity_summary=activity_summary,
         )
         self._save_manifest(manifest)
 
         logger.info(
-            "Repository %s indexed with %s files and %s chunks",
+            "Repository %s indexed: %s files, %s chunks, HEAD %s",
             repo.repo_name,
             len(files),
             len(chunks),
+            head_sha[:7],
         )
         return AnalyzeRepoResponse(
             status="ready",
@@ -124,7 +198,149 @@ class ResearchAssistantService:
             chunks_created=len(chunks),
             message="Repository analyzed and indexed successfully.",
             repo_summary=summary,
+            head_commit_sha=head_sha,
+            first_commit=first_commit,
+            changes_since_previous=changes,
+            commit_history=commit_history,
+            activity_summary=activity_summary,
         )
+
+    def get_repo_history(self, repo_url: str) -> HistoryResponse:
+        repo = self.loader.resolve_repo(repo_url)
+        manifest = self._load_manifest(repo.repo_id)
+        if not manifest:
+            raise ValueError("Repository has not been analyzed yet. Run an analysis first.")
+        return HistoryResponse(
+            repo_name=repo.repo_name,
+            head_commit_sha=manifest.head_commit_sha,
+            first_commit=manifest.first_commit,
+            commit_history=manifest.commit_history,
+            changes_since_previous=manifest.changes_since_previous,
+        )
+
+    def list_versions(self, repo_url: str) -> VersionListResponse:
+        repo = self.loader.resolve_repo(repo_url)
+        manifest = self._load_manifest(repo.repo_id)
+        if not manifest:
+            raise ValueError("Repository has not been analyzed yet. Run an analysis first.")
+        return VersionListResponse(
+            repo_name=repo.repo_name,
+            branch=repo.branch,
+            head_commit_sha=manifest.head_commit_sha,
+            first_commit=manifest.first_commit,
+            commit_history=manifest.commit_history,
+        )
+
+    def get_onboarding(self, repo_url: str) -> OnboardingResponse:
+        repo = self.loader.resolve_repo(repo_url)
+        manifest = self._load_manifest(repo.repo_id)
+        if not manifest:
+            raise ValueError("Repository has not been analyzed yet. Run an analysis first.")
+        return self.onboarding_service.generate(
+            repo=repo,
+            summary=manifest.summary,
+            commit_history=manifest.commit_history,
+        )
+
+    def list_branches(self, repo_url: str) -> BranchListResponse:
+        return self.compare_service.list_branches(repo_url)
+
+    def compare_branches(
+        self,
+        repo_url: str,
+        base_branch: str,
+        head_branch: str,
+    ) -> CompareBranchesResponse:
+        return self.compare_service.compare_branches(repo_url, base_branch, head_branch)
+
+    def compare_versions(
+        self,
+        repo_url: str,
+        base_ref: str,
+        head_ref: str,
+        base_label: str | None,
+        head_label: str | None,
+    ) -> CompareVersionsResponse:
+        return self.compare_service.compare_versions(
+            repo_url,
+            base_ref,
+            head_ref,
+            base_label=base_label,
+            head_label=head_label,
+        )
+
+    def ask_compare(self, compare_id: str, question: str) -> AskCompareResponse:
+        return self.compare_service.ask_compare(compare_id, question)
+
+    def ask_version_compare(self, compare_id: str, question: str) -> AskVersionCompareResponse:
+        return self.compare_service.ask_version_compare(compare_id, question)
+
+    def _create_history_chunk(
+        self,
+        repo: RepoDescriptor,
+        commit_history: list,
+        head_sha: str,
+    ) -> ChunkRecord:
+        lines = [
+            f"Git commit history for {repo.repo_name} (branch: {repo.branch})",
+            f"HEAD commit: {head_sha[:7]}",
+            f"Total commits recorded: {len(commit_history)}",
+            "",
+        ]
+        for i, commit in enumerate(commit_history, 1):
+            lines.append(
+                f"{i}. [{commit.short_sha}] {commit.message} — {commit.author_name} ({commit.date})"
+            )
+        text = "\n".join(lines)
+        return ChunkRecord(
+            id=build_chunk_id(repo.repo_id, ".git/history", "commit_history", None, None, None, text),
+            repo_id=repo.repo_id,
+            repo_name=repo.repo_name,
+            file_path=".git/history",
+            language="text",
+            chunk_type="commit_history",
+            symbol_name=None,
+            start_line=None,
+            end_line=None,
+            short_summary=f"Full commit history for {repo.repo_name}: {len(commit_history)} commits, HEAD {head_sha[:7]}",
+            file_role="general",
+            text=text,
+        )
+
+    def _create_diff_chunks(
+        self,
+        repo: RepoDescriptor,
+        file_diffs: list[tuple[str, str]],
+        old_sha: str,
+        new_sha: str,
+    ) -> list[ChunkRecord]:
+        chunks: list[ChunkRecord] = []
+        for file_path, diff_text in file_diffs:
+            if not diff_text.strip():
+                continue
+            language = detect_language(file_path)
+            text = (
+                f"Git diff for {file_path}\n"
+                f"From commit {old_sha[:7]} → {new_sha[:7]}\n\n"
+                f"{diff_text}"
+            )
+            chunks.append(
+                ChunkRecord(
+                    id=build_chunk_id(repo.repo_id, file_path, "git_diff", None, None, None, diff_text),
+                    repo_id=repo.repo_id,
+                    repo_name=repo.repo_name,
+                    file_path=file_path,
+                    language=language,
+                    chunk_type="git_diff",
+                    symbol_name=None,
+                    start_line=None,
+                    end_line=None,
+                    short_summary=f"Changes to {file_path} ({old_sha[:7]} → {new_sha[:7]})",
+                    file_role="general",
+                    text=text,
+                )
+            )
+        return chunks
 
     def ask(self, repo_url: str, question: str) -> AskResponse:
         analyze_response = self.analyze_repo(repo_url)
@@ -247,10 +463,84 @@ async def ask_question(request: AskRequest) -> AskResponse:
         raise _to_http_exception(exc) from exc
 
 
+@app.get("/history", response_model=HistoryResponse)
+async def repo_history(repo_url: str = Query(..., min_length=10)) -> HistoryResponse:
+    try:
+        return service.get_repo_history(repo_url)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.get("/branches", response_model=BranchListResponse)
+async def list_branches(repo_url: str = Query(..., min_length=10)) -> BranchListResponse:
+    try:
+        return service.list_branches(repo_url)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.get("/versions", response_model=VersionListResponse)
+async def list_versions(repo_url: str = Query(..., min_length=10)) -> VersionListResponse:
+    try:
+        return service.list_versions(repo_url)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.post("/compare-branches", response_model=CompareBranchesResponse)
+async def compare_branches(request: CompareBranchesRequest) -> CompareBranchesResponse:
+    try:
+        return service.compare_branches(
+            request.repo_url,
+            request.base_branch,
+            request.head_branch,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.post("/compare-versions", response_model=CompareVersionsResponse)
+async def compare_versions(request: CompareVersionsRequest) -> CompareVersionsResponse:
+    try:
+        return service.compare_versions(
+            request.repo_url,
+            request.base_ref,
+            request.head_ref,
+            request.base_label,
+            request.head_label,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.post("/ask-compare", response_model=AskCompareResponse)
+async def ask_compare(request: AskCompareRequest) -> AskCompareResponse:
+    try:
+        return service.ask_compare(request.compare_id, request.question)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.post("/ask-version-compare", response_model=AskVersionCompareResponse)
+async def ask_version_compare(request: AskVersionCompareRequest) -> AskVersionCompareResponse:
+    try:
+        return service.ask_version_compare(request.compare_id, request.question)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
 @app.get("/repo-summary", response_model=RepoSummary)
 async def repo_summary(repo_url: str = Query(..., min_length=10)) -> RepoSummary:
     try:
         return service.get_repo_summary(repo_url)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.get("/onboarding", response_model=OnboardingResponse)
+async def get_onboarding(repo_url: str = Query(..., min_length=10)) -> OnboardingResponse:
+    try:
+        return service.get_onboarding(repo_url)
     except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc) from exc
 

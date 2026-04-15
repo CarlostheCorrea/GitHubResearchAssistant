@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI GitHub Research Assistant</title>
-    <link rel="stylesheet" href="/frontend/styles.css?v=3" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=11" />
   </head>
   <body>
     <div class="page-shell">
@@ -125,65 +125,283 @@
           </div>
         </section>
 
-        <section class="panel card">
+        <section class="panel card history-panel hidden" id="history-panel">
           <div class="panel-header">
+            <div>
+              <p class="eyebrow">Version History</p>
+              <h2>Commit Timeline</h2>
+            </div>
+            <span id="history-head-sha" class="history-sha-chip"></span>
+          </div>
+
+          <div id="changes-banner" class="changes-banner hidden"></div>
+
+          <!-- Sub-tabs -->
+          <div class="history-subtabs">
+            <button class="history-subtab history-subtab--active" data-subtab="timeline">Timeline</button>
+            <button class="history-subtab" data-subtab="flow">Activity Flow</button>
+          </div>
+
+          <!-- Timeline pane (existing) -->
+          <div id="history-timeline-pane">
+            <div id="commit-list-empty" class="empty-state hidden">
+              No commit history was recorded for this repository.
+            </div>
+            <div id="commit-list" class="commit-list hidden"></div>
+          </div>
+
+          <!-- Activity Flow pane (new) -->
+          <div id="history-flow-pane" class="hidden">
+            <div id="activity-summary-block" class="activity-summary-block hidden">
+              <p class="activity-summary-label">What's happening</p>
+              <p class="activity-summary-text" id="activity-summary-text"></p>
+            </div>
+            <div id="activity-flow-empty" class="empty-state hidden">No commit activity to display.</div>
+            <div id="activity-flow" class="activity-flow hidden"></div>
+          </div>
+        </section>
+
+        <section class="tabs-panel" aria-label="Workspace tabs">
+          <div class="workspace-tabs" role="tablist" aria-label="Repository workspace">
+            <button id="qa-tab-button" class="tab-button active" type="button" role="tab" aria-selected="true">
+              Repository Q&A
+            </button>
+            <button id="compare-tab-button" class="tab-button" type="button" role="tab" aria-selected="false">
+              Version comparison
+            </button>
+            <button id="onboarding-tab-button" class="tab-button" type="button" role="tab" aria-selected="false">
+              Onboarding
+            </button>
+          </div>
+        </section>
+
+        <!-- Unified chat panel -->
+        <section class="panel card chat-panel workspace-tab-content" data-workspace-tab="qa">
+          <div class="chat-panel-header panel-header">
             <div>
               <p class="eyebrow">Step 3</p>
               <h2>Ask Grounded Questions</h2>
             </div>
+            <button id="new-thread-button" type="button" class="new-thread-btn hidden">New thread</button>
           </div>
 
-          <form id="ask-form" class="ask-form">
-            <label class="field">
-              <span>Question</span>
-              <textarea
-                id="question-input"
-                rows="4"
-                placeholder="How does this repo train the model?"
-                disabled
-                required
-              ></textarea>
-            </label>
-            <div class="sample-questions">
-              <button type="button" class="sample-chip">How does this repo train the model?</button>
-              <button type="button" class="sample-chip">Where is the inference code?</button>
-              <button type="button" class="sample-chip">How is data loaded?</button>
-              <button type="button" class="sample-chip">Where is configuration defined?</button>
+          <!-- Scrollable conversation body -->
+          <div class="chat-body" id="chat-body">
+            <div id="chat-idle" class="chat-idle">
+              <p class="chat-idle-hint">Analyze a repository, then ask anything about the code, architecture, history, or recent changes.</p>
+              <div id="suggestions-area" class="query-suggestions hidden">
+                <p class="suggestions-label">Suggested</p>
+                <div class="suggestions-grid">
+                  <button type="button" class="suggestion-card sample-chip">How does this repo train the model?</button>
+                  <button type="button" class="suggestion-card sample-chip">Where is the inference code?</button>
+                  <button type="button" class="suggestion-card sample-chip">How is data loaded?</button>
+                  <button type="button" class="suggestion-card sample-chip">Where is configuration defined?</button>
+                  <button type="button" class="suggestion-card sample-chip suggestion-card--wide">What changed since the last analysis?</button>
+                </div>
+              </div>
             </div>
-            <button id="ask-button" type="submit" disabled>Ask</button>
-          </form>
-        </section>
-
-        <section class="panel card answer-panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Output</p>
-              <h2>Grounded Answer</h2>
+            <div id="chat-messages" class="chat-messages hidden">
+              <div id="chat-thinking" class="chat-thinking hidden">
+                <span class="thread-role thread-role--assistant">Assistant</span>
+                <div class="thinking-dots"><span></span><span></span><span></span></div>
+              </div>
             </div>
           </div>
-          <div id="answer-empty" class="empty-state">
-            Answers will appear here with retrieved evidence and cited source snippets.
-          </div>
-          <div id="answer-content" class="hidden">
-            <div id="answer-text" class="answer-text"></div>
+
+          <!-- Pinned input footer -->
+          <div class="chat-footer">
+            <form id="ask-form">
+              <div class="query-wrap">
+                <textarea
+                  id="question-input"
+                  class="query-input"
+                  rows="2"
+                  placeholder="Ask anything about this repository..."
+                  disabled
+                  required
+                ></textarea>
+                <div class="query-bottom">
+                  <span id="query-hint" class="query-hint">Analyze a repository to start asking questions.</span>
+                  <button id="ask-button" type="submit" class="query-ask-btn" disabled>
+                    Ask
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </section>
 
-        <section class="panel card sources-panel">
+        <!-- Source citations panel (right, sticky) -->
+        <section class="panel card sources-panel workspace-tab-content" data-workspace-tab="qa">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Evidence</p>
-              <h2>Retrieved Source Snippets</h2>
+              <h2>Source Citations</h2>
             </div>
+            <span id="sources-count" class="sources-count hidden"></span>
           </div>
           <div id="sources-empty" class="empty-state">
-            Retrieved chunks, line ranges, and snippet previews will appear after a question is answered.
+            Referenced files and code excerpts will appear here after each question.
           </div>
           <div id="sources-list" class="sources-list hidden"></div>
+        </section>
+
+        <section class="panel card version-compare-panel workspace-tab-content hidden" data-workspace-tab="compare">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Version comparison</p>
+              <h2>Compare Two Versions</h2>
+            </div>
+            <button id="refresh-branches-button" type="button" class="secondary-button" disabled>Refresh versions</button>
+          </div>
+
+          <div id="compare-empty" class="empty-state">
+            Analyze a repository first, then compare two versions such as the first commit against the newest commit or the two most recent commits.
+          </div>
+
+          <div id="compare-workspace" class="compare-workspace hidden">
+            <form id="compare-form" class="compare-form">
+              <label class="field">
+                <span>Comparison preset</span>
+                <select id="version-preset-select" disabled>
+                  <option value="first-to-newest">First commit to newest</option>
+                  <option value="two-most-recent">Two most recent commits</option>
+                  <option value="custom">Custom versions</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Base version</span>
+                <select id="base-branch-select" disabled></select>
+              </label>
+              <label class="field">
+                <span>Head version</span>
+                <select id="head-branch-select" disabled></select>
+              </label>
+              <div class="compare-actions">
+                <button id="compare-button" type="submit" disabled>Compare versions</button>
+                <span id="branch-status" class="cache-indicator hidden" aria-live="polite"></span>
+              </div>
+            </form>
+
+            <div id="compare-result" class="compare-result hidden">
+              <div class="compare-summary-grid">
+                <div class="compare-stat-card">
+                  <span>Status</span>
+                  <strong id="compare-status"></strong>
+                </div>
+                <div class="compare-stat-card">
+                  <span>Commits</span>
+                  <strong id="compare-commits"></strong>
+                </div>
+                <div class="compare-stat-card">
+                  <span>Files</span>
+                  <strong id="compare-files"></strong>
+                </div>
+                <div class="compare-stat-card">
+                  <span>Diff size</span>
+                  <strong id="compare-diff-size"></strong>
+                </div>
+              </div>
+
+              <div class="compare-columns">
+                <div>
+                  <p class="summary-label">Changed files</p>
+                  <div id="compare-file-list" class="compare-file-list"></div>
+                </div>
+                <div>
+                  <p class="summary-label">Ask about the differences</p>
+                  <form id="ask-compare-form" class="compare-question-form">
+                    <textarea
+                      id="compare-question-input"
+                      class="query-input"
+                      rows="3"
+                      placeholder="What changed between these versions?"
+                      disabled
+                      required
+                    ></textarea>
+                    <button id="ask-compare-button" type="submit" disabled>Ask about diff</button>
+                  </form>
+                  <div id="compare-answer" class="compare-answer hidden"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel card onboarding-panel workspace-tab-content hidden" data-workspace-tab="onboarding">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Onboarding Guide</p>
+              <h2>Getting Started</h2>
+            </div>
+            <button id="generate-onboarding-button" type="button" class="secondary-button" disabled>Generate Guide</button>
+          </div>
+
+          <div id="onboarding-empty" class="empty-state">
+            Analyze a repository, then click "Generate Guide" to get a personalized onboarding path.
+          </div>
+
+          <div id="onboarding-loading" class="onboarding-loading hidden">
+            <div class="thinking-dots"><span></span><span></span><span></span></div>
+            <p class="onboarding-loading-text">Building your onboarding guide — analyzing code structure, concepts, and contributors…</p>
+          </div>
+
+          <div id="onboarding-content" class="onboarding-content hidden">
+
+            <!-- Reading Path -->
+            <div class="onboarding-section">
+              <div class="onboarding-section-header">
+                <span class="onboarding-section-icon">🗺</span>
+                <div>
+                  <p class="eyebrow">Reading Path</p>
+                  <h3 class="onboarding-section-title">Start with these files, in order</h3>
+                </div>
+              </div>
+              <div id="onboarding-reading-order" class="reading-order"></div>
+            </div>
+
+            <!-- Core Concepts + Contributors (two-col) -->
+            <div class="onboarding-two-col">
+              <div class="onboarding-section">
+                <div class="onboarding-section-header">
+                  <span class="onboarding-section-icon">💡</span>
+                  <div>
+                    <p class="eyebrow">Core Concepts</p>
+                    <h3 class="onboarding-section-title">Key ideas to understand</h3>
+                  </div>
+                </div>
+                <div id="onboarding-concepts" class="concepts-list"></div>
+              </div>
+
+              <div class="onboarding-section">
+                <div class="onboarding-section-header">
+                  <span class="onboarding-section-icon">👥</span>
+                  <div>
+                    <p class="eyebrow">Contributors</p>
+                    <h3 class="onboarding-section-title">Who built this</h3>
+                  </div>
+                </div>
+                <div id="onboarding-contributors" class="contributors-list"></div>
+              </div>
+            </div>
+
+            <!-- Complexity note -->
+            <div id="onboarding-complexity" class="complexity-block hidden">
+              <div class="complexity-icon">⚡</div>
+              <div>
+                <p class="complexity-label">Heads up</p>
+                <p class="complexity-text" id="onboarding-complexity-text"></p>
+              </div>
+            </div>
+
+          </div>
         </section>
       </main>
     </div>
 
-    <script src="/frontend/app.js?v=3" defer></script>
+    <script src="/frontend/app.js?v=11" defer></script>
   </body>
 </html>

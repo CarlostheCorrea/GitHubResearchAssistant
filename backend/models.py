@@ -5,6 +5,30 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class CommitRecord(BaseModel):
+    sha: str
+    short_sha: str
+    author_name: str
+    date: str  # ISO 8601 string
+    message: str  # first line of commit message
+    file_changes: list[dict[str, str]] = Field(default_factory=list)
+    # Each entry: {"path": "src/foo.py", "status": "added"|"modified"|"deleted"|"renamed"}
+    summary: str = ""  # 1-sentence LLM explanation of what this commit does
+
+
+class ChangesSummary(BaseModel):
+    old_sha: str
+    new_sha: str
+    files_changed: int
+    insertions: int
+    deletions: int
+    changed_files: list[str] = Field(default_factory=list)
+    # File-level breakdown (not line counts)
+    files_added: int = 0
+    files_removed: int = 0
+    files_modified: int = 0
+
+
 class HealthResponse(BaseModel):
     status: str
     timestamp: datetime
@@ -145,6 +169,11 @@ class AnalyzeRepoResponse(BaseModel):
     chunks_created: int
     message: str
     repo_summary: RepoSummary
+    head_commit_sha: str | None = None
+    first_commit: CommitRecord | None = None
+    changes_since_previous: ChangesSummary | None = None
+    commit_history: list[CommitRecord] = Field(default_factory=list)
+    activity_summary: str = ""  # 1-2 sentence LLM summary of recent commit activity
 
 
 class DeleteRepoCacheResponse(BaseModel):
@@ -181,3 +210,145 @@ class RepoManifest(BaseModel):
     chunks_created: int
     created_at: datetime
     updated_at: datetime
+    head_commit_sha: str | None = None
+    first_commit: CommitRecord | None = None
+    previous_head_sha: str | None = None
+    commit_history: list[CommitRecord] = Field(default_factory=list)
+    changes_since_previous: ChangesSummary | None = None
+    activity_summary: str = ""
+
+
+class HistoryResponse(BaseModel):
+    repo_name: str
+    head_commit_sha: str | None
+    first_commit: CommitRecord | None = None
+    commit_history: list[CommitRecord]
+    changes_since_previous: ChangesSummary | None
+
+
+# ── Version comparison ──────────────────────────────────────────────────────
+
+class VersionListResponse(BaseModel):
+    repo_name: str
+    branch: str
+    head_commit_sha: str | None
+    first_commit: CommitRecord | None = None
+    commit_history: list[CommitRecord] = Field(default_factory=list)
+
+
+class VersionFileChange(BaseModel):
+    filename: str
+    status: str  # added | removed | modified | renamed
+    additions: int
+    deletions: int
+    changes: int
+    patch: str | None = None  # raw unified diff text (may be absent for binary)
+
+
+class CompareVersionsRequest(BaseModel):
+    repo_url: str = Field(..., min_length=10)
+    base_ref: str = Field(..., min_length=1)
+    head_ref: str = Field(..., min_length=1)
+    base_label: str | None = None
+    head_label: str | None = None
+
+
+class CompareVersionsResponse(BaseModel):
+    repo_name: str
+    base_ref: str
+    head_ref: str
+    base_label: str
+    head_label: str
+    status: str  # ahead | behind | diverged | identical
+    ahead_by: int
+    behind_by: int
+    total_commits: int
+    commits: list[CommitRecord] = Field(default_factory=list)
+    files_changed: int
+    total_additions: int
+    total_deletions: int
+    changed_files: list[VersionFileChange] = Field(default_factory=list)
+    compare_id: str  # stable key used by /ask-compare
+
+
+class AskVersionCompareRequest(BaseModel):
+    compare_id: str
+    question: str = Field(..., min_length=3)
+
+
+class AskVersionCompareResponse(BaseModel):
+    compare_id: str
+    question: str
+    answer: str
+
+
+# ── Branch comparison compatibility aliases ─────────────────────────────────
+
+class BranchListResponse(BaseModel):
+    repo_name: str
+    branches: list[str]
+
+
+class BranchFileChange(VersionFileChange):
+    pass
+
+
+class CompareBranchesRequest(BaseModel):
+    repo_url: str = Field(..., min_length=10)
+    base_branch: str = Field(..., min_length=1)
+    head_branch: str = Field(..., min_length=1)
+
+
+class CompareBranchesResponse(BaseModel):
+    repo_name: str
+    base_branch: str
+    head_branch: str
+    status: str  # ahead | behind | diverged | identical
+    ahead_by: int
+    behind_by: int
+    total_commits: int
+    commits: list[CommitRecord] = Field(default_factory=list)
+    files_changed: int
+    total_additions: int
+    total_deletions: int
+    changed_files: list[BranchFileChange] = Field(default_factory=list)
+    compare_id: str  # stable key used by /ask-compare
+
+
+class AskCompareRequest(BaseModel):
+    compare_id: str
+    question: str = Field(..., min_length=3)
+
+
+class AskCompareResponse(BaseModel):
+    compare_id: str
+    question: str
+    answer: str
+
+
+# ── Onboarding Guide ────────────────────────────────────────────────────────
+
+class ReadingStep(BaseModel):
+    step: int
+    file_path: str
+    role: str
+    reason: str
+
+class CoreConcept(BaseModel):
+    name: str
+    description: str
+    key_files: list[str] = Field(default_factory=list)
+
+class ContributorProfile(BaseModel):
+    name: str
+    commits: int
+    focus_area: str
+    recent_files: list[str] = Field(default_factory=list)
+
+class OnboardingResponse(BaseModel):
+    repo_name: str
+    reading_order: list[ReadingStep] = Field(default_factory=list)
+    core_concepts: list[CoreConcept] = Field(default_factory=list)
+    contributors: list[ContributorProfile] = Field(default_factory=list)
+    complexity_note: str = ""
+    cached: bool = False

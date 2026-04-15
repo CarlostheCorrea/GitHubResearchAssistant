@@ -162,6 +162,117 @@ def split_code_sections(content: str) -> list[SectionSpan]:
     return _merge_small_sections(sections)
 
 
+def extract_go_sections(content: str) -> list[SectionSpan]:
+    """Split Go source into func/method/type/struct/interface declarations."""
+    decl_pattern = re.compile(
+        r"^(func\s+(?:\(\w[^)]*\)\s+)?\w+|type\s+\w+\s+(?:struct|interface)|var\s+\w+|const\s+\w+)",
+        re.MULTILINE,
+    )
+    symbol_pattern = re.compile(
+        r"^(?:func\s+(?:\(\w[^)]*\)\s+)?(\w+)|type\s+(\w+)|var\s+(\w+)|const\s+(\w+))"
+    )
+    return _split_declarations(content, decl_pattern, symbol_pattern, "go_declaration")
+
+
+def extract_rust_sections(content: str) -> list[SectionSpan]:
+    """Split Rust source into fn/impl/struct/enum/trait/mod declarations."""
+    decl_pattern = re.compile(
+        r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|impl|struct|enum|trait|mod|type|const|static)\s+\w+",
+        re.MULTILINE,
+    )
+    symbol_pattern = re.compile(
+        r"(?:fn|impl|struct|enum|trait|mod|type|const|static)\s+(\w+)"
+    )
+    return _split_declarations(content, decl_pattern, symbol_pattern, "rust_declaration")
+
+
+def extract_java_sections(content: str) -> list[SectionSpan]:
+    """Split Java source into class/interface/enum/method-level blocks."""
+    decl_pattern = re.compile(
+        r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native)\s+)*"
+        r"(?:class|interface|enum|record|@interface|\w[\w<>\[\],\s]*\s+\w+\s*\()",
+        re.MULTILINE,
+    )
+    symbol_pattern = re.compile(
+        r"(?:class|interface|enum|record)\s+(\w+)|(\w+)\s*\([^)]*\)\s*(?:throws\s+\w+)?\s*\{"
+    )
+    return _split_declarations(content, decl_pattern, symbol_pattern, "java_declaration")
+
+
+def extract_cpp_sections(content: str) -> list[SectionSpan]:
+    """Split C/C++ source into function/class/struct/namespace declarations."""
+    decl_pattern = re.compile(
+        r"^(?:(?:inline|static|virtual|explicit|constexpr|template\s*<[^>]*>)\s+)*"
+        r"(?:class|struct|namespace|enum(?:\s+class)?|\w[\w:*&<>\[\],\s]*\s+\w+\s*\()",
+        re.MULTILINE,
+    )
+    symbol_pattern = re.compile(
+        r"(?:class|struct|namespace|enum(?:\s+class)?)\s+(\w+)|(\w+)\s*\("
+    )
+    return _split_declarations(content, decl_pattern, symbol_pattern, "cpp_declaration")
+
+
+def extract_ruby_sections(content: str) -> list[SectionSpan]:
+    """Split Ruby source into class/module/def declarations."""
+    decl_pattern = re.compile(
+        r"^\s*(?:class|module|def)\s+\S+",
+        re.MULTILINE,
+    )
+    symbol_pattern = re.compile(
+        r"(?:class|module|def)\s+(\S+)"
+    )
+    return _split_declarations(content, decl_pattern, symbol_pattern, "ruby_declaration")
+
+
+def _split_declarations(
+    content: str,
+    decl_pattern: re.Pattern[str],
+    symbol_pattern: re.Pattern[str],
+    chunk_type: str,
+) -> list[SectionSpan]:
+    """
+    Generic declaration splitter used by all non-Python language parsers.
+
+    Finds lines matching *decl_pattern* as section boundaries, extracts an
+    optional symbol name with *symbol_pattern*, and returns a list of
+    SectionSpan objects.  Falls back to blank-line splitting when fewer than
+    two boundaries are detected.
+    """
+    lines = content.splitlines()
+    if not lines:
+        return []
+
+    boundaries: list[int] = []
+    for index, line in enumerate(lines, start=1):
+        if decl_pattern.search(line):
+            boundaries.append(index)
+
+    if len(boundaries) < 2:
+        return _split_by_blank_lines(content, chunk_type=chunk_type)
+
+    boundaries.append(len(lines) + 1)
+    sections: list[SectionSpan] = []
+    for start, end in zip(boundaries, boundaries[1:]):
+        section_lines = lines[start - 1 : end - 1]
+        text = "\n".join(section_lines).strip()
+        if not text:
+            continue
+        first_line = section_lines[0]
+        m = symbol_pattern.search(first_line)
+        symbol = next((g for g in (m.groups() if m else []) if g), None)
+        sections.append(
+            SectionSpan(
+                chunk_type=chunk_type,
+                text=text,
+                start_line=start,
+                end_line=end - 1,
+                symbol_name=symbol,
+                short_summary=truncate_text(compact_whitespace(text), 120),
+            )
+        )
+    return _merge_small_sections(sections)
+
+
 def split_text_sections(content: str) -> list[SectionSpan]:
     return _split_by_blank_lines(content, chunk_type="text_block")
 

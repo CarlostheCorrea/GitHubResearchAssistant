@@ -13,6 +13,18 @@ SUPPORTED_EXTENSIONS = {
     ".yaml",
     ".yml",
     ".toml",
+    # Systems / compiled languages
+    ".go",
+    ".rs",
+    ".java",
+    ".cpp",
+    ".cc",
+    ".cxx",
+    ".hpp",
+    ".c",
+    ".h",
+    # Scripting
+    ".rb",
 }
 
 SKIP_DIRECTORIES = {

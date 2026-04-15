@@ -1,6 +1,13 @@
 const state = {
   repoUrl: "",
   repoSummary: null,
+  hasConversation: false,
+  activeTab: "qa",
+  versions: [],
+  firstCommit: null,
+  versionsLoadedFor: "",
+  comparison: null,
+  compareId: "",
 };
 
 const elements = {
@@ -28,17 +35,95 @@ const elements = {
   inferenceFiles: document.getElementById("inference-files"),
   configFiles: document.getElementById("config-files"),
   dataFiles: document.getElementById("data-files"),
-  answerEmpty: document.getElementById("answer-empty"),
-  answerContent: document.getElementById("answer-content"),
-  answerText: document.getElementById("answer-text"),
+  chatBody: document.getElementById("chat-body"),
+  chatIdle: document.getElementById("chat-idle"),
+  chatMessages: document.getElementById("chat-messages"),
+  chatThinking: document.getElementById("chat-thinking"),
+  suggestionsArea: document.getElementById("suggestions-area"),
+  newThreadButton: document.getElementById("new-thread-button"),
   sourcesEmpty: document.getElementById("sources-empty"),
   sourcesList: document.getElementById("sources-list"),
+  sourcesCount: document.getElementById("sources-count"),
   sampleQuestions: Array.from(document.querySelectorAll(".sample-chip")),
+  queryHint: document.getElementById("query-hint"),
+  // History
+  historyPanel: document.getElementById("history-panel"),
+  historyHeadSha: document.getElementById("history-head-sha"),
+  changesBanner: document.getElementById("changes-banner"),
+  commitListEmpty: document.getElementById("commit-list-empty"),
+  commitList: document.getElementById("commit-list"),
+  // History sub-tabs
+  historyTimelinePane: document.getElementById("history-timeline-pane"),
+  historyFlowPane: document.getElementById("history-flow-pane"),
+  activitySummaryBlock: document.getElementById("activity-summary-block"),
+  activitySummaryText: document.getElementById("activity-summary-text"),
+  activityFlowEmpty: document.getElementById("activity-flow-empty"),
+  activityFlow: document.getElementById("activity-flow"),
+  // Version comparison
+  qaTabButton: document.getElementById("qa-tab-button"),
+  compareTabButton: document.getElementById("compare-tab-button"),
+  onboardingTabButton: document.getElementById("onboarding-tab-button"),
+  workspacePanels: Array.from(document.querySelectorAll(".workspace-tab-content")),
+  refreshBranchesButton: document.getElementById("refresh-branches-button"),
+  compareEmpty: document.getElementById("compare-empty"),
+  compareWorkspace: document.getElementById("compare-workspace"),
+  compareForm: document.getElementById("compare-form"),
+  versionPresetSelect: document.getElementById("version-preset-select"),
+  baseBranchSelect: document.getElementById("base-branch-select"),
+  headBranchSelect: document.getElementById("head-branch-select"),
+  compareButton: document.getElementById("compare-button"),
+  branchStatus: document.getElementById("branch-status"),
+  compareResult: document.getElementById("compare-result"),
+  compareStatus: document.getElementById("compare-status"),
+  compareCommits: document.getElementById("compare-commits"),
+  compareFiles: document.getElementById("compare-files"),
+  compareDiffSize: document.getElementById("compare-diff-size"),
+  compareFileList: document.getElementById("compare-file-list"),
+  askCompareForm: document.getElementById("ask-compare-form"),
+  compareQuestionInput: document.getElementById("compare-question-input"),
+  askCompareButton: document.getElementById("ask-compare-button"),
+  compareAnswer: document.getElementById("compare-answer"),
+  // Onboarding
+  generateOnboardingButton: document.getElementById("generate-onboarding-button"),
+  onboardingEmpty: document.getElementById("onboarding-empty"),
+  onboardingLoading: document.getElementById("onboarding-loading"),
+  onboardingContent: document.getElementById("onboarding-content"),
+  onboardingReadingOrder: document.getElementById("onboarding-reading-order"),
+  onboardingConcepts: document.getElementById("onboarding-concepts"),
+  onboardingContributors: document.getElementById("onboarding-contributors"),
+  onboardingComplexity: document.getElementById("onboarding-complexity"),
+  onboardingComplexityText: document.getElementById("onboarding-complexity-text"),
 };
 
 elements.analyzeForm.addEventListener("submit", handleAnalyze);
 elements.askForm.addEventListener("submit", handleAsk);
 elements.clearCacheButton.addEventListener("click", handleClearCache);
+elements.newThreadButton.addEventListener("click", handleNewThread);
+
+// History sub-tab switching
+document.querySelectorAll(".history-subtab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".history-subtab").forEach((b) => b.classList.remove("history-subtab--active"));
+    btn.classList.add("history-subtab--active");
+    const subtab = btn.dataset.subtab;
+    elements.historyTimelinePane.classList.toggle("hidden", subtab !== "timeline");
+    elements.historyFlowPane.classList.toggle("hidden", subtab !== "flow");
+  });
+});
+elements.qaTabButton.addEventListener("click", () => switchWorkspaceTab("qa"));
+elements.compareTabButton.addEventListener("click", () => switchWorkspaceTab("compare"));
+elements.onboardingTabButton.addEventListener("click", () => switchWorkspaceTab("onboarding"));
+elements.generateOnboardingButton.addEventListener("click", handleGenerateOnboarding);
+elements.refreshBranchesButton.addEventListener("click", () => loadVersions(true));
+elements.versionPresetSelect.addEventListener("change", applyVersionPreset);
+elements.baseBranchSelect.addEventListener("change", () => {
+  elements.versionPresetSelect.value = "custom";
+});
+elements.headBranchSelect.addEventListener("change", () => {
+  elements.versionPresetSelect.value = "custom";
+});
+elements.compareForm.addEventListener("submit", handleCompareVersions);
+elements.askCompareForm.addEventListener("submit", handleAskCompare);
 elements.sampleQuestions.forEach((button) => {
   button.addEventListener("click", () => {
     elements.questionInput.value = button.textContent.trim();
@@ -71,13 +156,37 @@ async function handleAnalyze(event) {
 
     state.repoUrl = repoUrl;
     state.repoSummary = payload.repo_summary;
+    state.versions = [];
+    state.firstCommit = payload.first_commit || null;
+    state.versionsLoadedFor = "";
+    state.comparison = null;
+    state.compareId = "";
     renderRepoSummary(payload.repo_summary, payload);
+    renderHistory(
+      payload.head_commit_sha || null,
+      payload.commit_history || [],
+      payload.changes_since_previous || null,
+      payload.activity_summary || "",
+    );
+    resetCompareResult();
+    enableCompareWorkspace(true);
     setCacheIndicator("", "");
     elements.questionInput.disabled = false;
     elements.askButton.disabled = false;
+    elements.generateOnboardingButton.disabled = false;
+    elements.queryHint.textContent = `Grounded answers with cited sources from ${payload.repo_summary.repo_name}.`;
+    if (!state.hasConversation) {
+      elements.suggestionsArea.classList.remove("hidden");
+    }
+    document.querySelectorAll(".suggestion-card").forEach((card) => {
+      card.disabled = false;
+    });
 
     const cacheText = payload.cached ? "Loaded cached index." : "Fresh index created.";
     setStatus("success", `${payload.message} ${cacheText}`);
+    if (state.activeTab === "compare") {
+      await loadVersions(false);
+    }
   } catch (error) {
     setStatus("error", error.message || "Repository analysis failed.");
   } finally {
@@ -97,7 +206,9 @@ async function handleAsk(event) {
     return;
   }
 
+  elements.questionInput.value = "";
   setLoading(true, "Retrieving relevant chunks and generating a grounded answer...");
+  showThinking(true);
 
   try {
     const response = await fetch("/ask", {
@@ -114,7 +225,8 @@ async function handleAsk(event) {
       throw new Error(payload.detail || "Question answering failed.");
     }
 
-    renderAnswer(payload.answer);
+    showThinking(false);
+    appendChatExchange(question, payload.answer);
     renderSources(payload.sources || []);
     if (payload.repo_summary) {
       state.repoSummary = payload.repo_summary;
@@ -122,6 +234,7 @@ async function handleAsk(event) {
     }
     setStatus("success", "Answer generated from retrieved repository evidence.");
   } catch (error) {
+    showThinking(false);
     setStatus("error", error.message || "Question answering failed.");
   } finally {
     setLoading(false);
@@ -145,14 +258,25 @@ async function handleClearCache() {
     clearAnswer();
     state.repoUrl = "";
     state.repoSummary = null;
+    state.versions = [];
+    state.firstCommit = null;
+    state.versionsLoadedFor = "";
+    state.comparison = null;
+    state.compareId = "";
     elements.repoUrl.value = "";
     elements.questionInput.value = "";
     elements.questionInput.disabled = true;
     elements.askButton.disabled = true;
+    elements.queryHint.textContent = "Analyze a repository to start asking questions.";
+    document.querySelectorAll(".suggestion-card").forEach((card) => {
+      card.disabled = true;
+    });
     setCacheIndicator(
       payload.status === "cleared" ? "success" : "info",
       payload.status === "cleared" ? "All cache cleared" : "No cache found"
     );
+    enableCompareWorkspace(false);
+    resetCompareResult();
     setStatus("success", payload.message);
   } catch (error) {
     setCacheIndicator("error", "Clear failed");
@@ -160,6 +284,333 @@ async function handleClearCache() {
   } finally {
     setLoading(false);
   }
+}
+
+function switchWorkspaceTab(tabName) {
+  state.activeTab = tabName;
+  elements.qaTabButton.classList.toggle("active", tabName === "qa");
+  elements.compareTabButton.classList.toggle("active", tabName === "compare");
+  elements.onboardingTabButton.classList.toggle("active", tabName === "onboarding");
+  elements.qaTabButton.setAttribute("aria-selected", String(tabName === "qa"));
+  elements.compareTabButton.setAttribute("aria-selected", String(tabName === "compare"));
+  elements.onboardingTabButton.setAttribute("aria-selected", String(tabName === "onboarding"));
+
+  elements.workspacePanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.workspaceTab !== tabName);
+  });
+
+  if (tabName === "compare" && state.repoUrl && state.versionsLoadedFor !== state.repoUrl) {
+    loadVersions(false);
+  }
+}
+
+function enableCompareWorkspace(enabled) {
+  elements.compareEmpty.classList.toggle("hidden", enabled);
+  elements.compareWorkspace.classList.toggle("hidden", !enabled);
+  elements.refreshBranchesButton.disabled = !enabled;
+  elements.versionPresetSelect.disabled = !enabled || !state.versions.length;
+  elements.baseBranchSelect.disabled = !enabled || !state.versions.length;
+  elements.headBranchSelect.disabled = !enabled || !state.versions.length;
+  elements.compareButton.disabled = !enabled || state.versions.length < 1;
+}
+
+async function loadVersions(force) {
+  if (!state.repoUrl) {
+    setBranchStatus("info", "Analyze a repository first.");
+    enableCompareWorkspace(false);
+    return;
+  }
+  if (!force && state.versionsLoadedFor === state.repoUrl && state.versions.length) {
+    enableCompareWorkspace(true);
+    return;
+  }
+
+  setBranchLoading(true, "Loading versions...");
+  try {
+    const response = await fetch(`/versions?repo_url=${encodeURIComponent(state.repoUrl)}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Failed to load versions.");
+    }
+    state.versions = payload.commit_history || [];
+    state.firstCommit = payload.first_commit || state.firstCommit;
+    state.versionsLoadedFor = state.repoUrl;
+    renderVersionOptions(state.versions, state.firstCommit);
+    resetCompareResult();
+    enableCompareWorkspace(true);
+    setBranchStatus(
+      state.versions.length ? "success" : "info",
+      state.versions.length ? `${state.versions.length} versions loaded` : "No versions found"
+    );
+  } catch (error) {
+    setBranchStatus("error", error.message || "Failed to load versions.");
+  } finally {
+    setBranchLoading(false);
+  }
+}
+
+function renderVersionOptions(versions, firstCommit) {
+  elements.baseBranchSelect.replaceChildren();
+  elements.headBranchSelect.replaceChildren();
+
+  const optionRecords = buildVersionOptionRecords(versions, firstCommit);
+  optionRecords.forEach((record) => {
+    elements.baseBranchSelect.appendChild(new Option(record.label, record.sha));
+    elements.headBranchSelect.appendChild(new Option(record.label, record.sha));
+  });
+
+  const firstPreset = elements.versionPresetSelect.querySelector('option[value="first-to-newest"]');
+  if (firstPreset) {
+    firstPreset.disabled = !firstCommit;
+  }
+  elements.versionPresetSelect.value = firstCommit ? "first-to-newest" : "two-most-recent";
+  applyVersionPreset();
+}
+
+function buildVersionOptionRecords(versions, firstCommit) {
+  const seen = new Set();
+  const records = [];
+  if (firstCommit) {
+    records.push(firstCommit);
+    seen.add(firstCommit.sha);
+  }
+  versions.forEach((version) => {
+    if (!seen.has(version.sha)) {
+      records.push(version);
+      seen.add(version.sha);
+    }
+  });
+  return records.map((version) => ({
+    sha: version.sha,
+    label: formatVersionOption(version),
+  }));
+}
+
+function applyVersionPreset() {
+  const newest = state.versions[0];
+  const previous = state.versions[1];
+  if (elements.versionPresetSelect.value === "first-to-newest" && state.firstCommit && newest) {
+    elements.baseBranchSelect.value = state.firstCommit.sha;
+    elements.headBranchSelect.value = newest.sha;
+  }
+  if (elements.versionPresetSelect.value === "two-most-recent" && newest && previous) {
+    elements.baseBranchSelect.value = previous.sha;
+    elements.headBranchSelect.value = newest.sha;
+  }
+}
+
+async function handleCompareVersions(event) {
+  event.preventDefault();
+  const baseRef = elements.baseBranchSelect.value;
+  const headRef = elements.headBranchSelect.value;
+  if (!state.repoUrl) {
+    setBranchStatus("error", "Analyze a repository first.");
+    return;
+  }
+  if (!baseRef || !headRef) {
+    setBranchStatus("error", "Choose both versions.");
+    return;
+  }
+
+  setBranchLoading(true, "Comparing versions...");
+  resetCompareResult();
+  try {
+    const response = await fetch("/compare-versions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo_url: state.repoUrl,
+        base_ref: baseRef,
+        head_ref: headRef,
+        base_label: selectedOptionText(elements.baseBranchSelect),
+        head_label: selectedOptionText(elements.headBranchSelect),
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Version comparison failed.");
+    }
+    state.comparison = payload;
+    state.compareId = payload.compare_id;
+    renderComparison(payload);
+    setBranchStatus("success", "Comparison ready");
+  } catch (error) {
+    setBranchStatus("error", error.message || "Version comparison failed.");
+  } finally {
+    setBranchLoading(false);
+  }
+}
+
+function renderComparison(comparison) {
+  elements.compareResult.classList.remove("hidden");
+  elements.compareStatus.textContent = formatCompareStatus(comparison.status);
+  elements.compareCommits.textContent = `${comparison.total_commits} commit${comparison.total_commits !== 1 ? "s" : ""}`;
+  elements.compareFiles.textContent = `${comparison.files_changed} file${comparison.files_changed !== 1 ? "s" : ""}`;
+  elements.compareDiffSize.textContent = `+${comparison.total_additions} / -${comparison.total_deletions}`;
+  renderCompareFileList(comparison.changed_files || []);
+  elements.compareQuestionInput.disabled = false;
+  elements.askCompareButton.disabled = false;
+  elements.compareQuestionInput.value = "What are the important differences between these versions?";
+  elements.compareAnswer.classList.add("hidden");
+  elements.compareAnswer.replaceChildren();
+}
+
+function renderCompareFileList(files) {
+  elements.compareFileList.replaceChildren();
+  if (!files.length) {
+    const empty = document.createElement("div");
+    empty.className = "path-empty";
+    empty.textContent = "No file changes returned.";
+    elements.compareFileList.appendChild(empty);
+    return;
+  }
+
+  files.slice(0, 80).forEach((file) => {
+    const row = document.createElement("div");
+    row.className = "compare-file-row";
+
+    const name = document.createElement("p");
+    name.className = "compare-file-name";
+    name.textContent = file.filename;
+    name.title = file.filename;
+
+    const meta = document.createElement("div");
+    meta.className = "compare-file-meta";
+    meta.appendChild(buildCompareBadge(file.status, "status"));
+    meta.appendChild(buildCompareBadge(`+${file.additions}`, "added"));
+    meta.appendChild(buildCompareBadge(`-${file.deletions}`, "removed"));
+
+    row.append(name, meta);
+    elements.compareFileList.appendChild(row);
+  });
+
+  if (files.length > 80) {
+    const overflow = document.createElement("div");
+    overflow.className = "path-empty";
+    overflow.textContent = `${files.length - 80} more files omitted from the visible list.`;
+    elements.compareFileList.appendChild(overflow);
+  }
+}
+
+function buildCompareBadge(text, kind) {
+  const badge = document.createElement("span");
+  badge.className = `compare-badge ${kind}`;
+  badge.textContent = text;
+  return badge;
+}
+
+async function handleAskCompare(event) {
+  event.preventDefault();
+  const question = elements.compareQuestionInput.value.trim();
+  if (!state.compareId) {
+    setBranchStatus("error", "Run a version comparison first.");
+    return;
+  }
+  if (!question) {
+    setBranchStatus("error", "Enter a question about the version differences.");
+    return;
+  }
+
+  setBranchLoading(true, "Answering from version diff context...");
+  renderCompareAnswer(question, "", true);
+  try {
+    const response = await fetch("/ask-version-compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        compare_id: state.compareId,
+        question,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Version comparison question failed.");
+    }
+    renderCompareAnswer(question, payload.answer, false);
+    setBranchStatus("success", "Answered from version comparison data");
+  } catch (error) {
+    elements.compareAnswer.classList.add("hidden");
+    setBranchStatus("error", error.message || "Version comparison question failed.");
+  } finally {
+    setBranchLoading(false);
+  }
+}
+
+function renderCompareAnswer(question, answer, loading) {
+  elements.compareAnswer.classList.remove("hidden");
+  elements.compareAnswer.replaceChildren();
+
+  const questionNode = document.createElement("p");
+  questionNode.className = "compare-answer-question";
+  questionNode.textContent = question;
+  elements.compareAnswer.appendChild(questionNode);
+
+  const body = document.createElement("div");
+  body.className = "answer-text";
+  if (loading) {
+    const pending = document.createElement("p");
+    pending.textContent = "Reading the version comparison...";
+    body.appendChild(pending);
+  } else {
+    splitAnswerParagraphs(answer).forEach((paragraph) => {
+      const p = document.createElement("p");
+      p.textContent = paragraph;
+      body.appendChild(p);
+    });
+  }
+  elements.compareAnswer.appendChild(body);
+}
+
+function resetCompareResult() {
+  state.comparison = null;
+  state.compareId = "";
+  elements.compareResult.classList.add("hidden");
+  elements.compareFileList.replaceChildren();
+  elements.compareQuestionInput.value = "";
+  elements.compareQuestionInput.disabled = true;
+  elements.askCompareButton.disabled = true;
+  elements.compareAnswer.classList.add("hidden");
+  elements.compareAnswer.replaceChildren();
+}
+
+function setBranchLoading(isLoading, message = "") {
+  elements.refreshBranchesButton.disabled = isLoading || !state.repoUrl;
+  elements.versionPresetSelect.disabled = isLoading || !state.repoUrl || !state.versions.length;
+  elements.baseBranchSelect.disabled = isLoading || !state.repoUrl || !state.versions.length;
+  elements.headBranchSelect.disabled = isLoading || !state.repoUrl || !state.versions.length;
+  elements.compareButton.disabled = isLoading || !state.repoUrl || !state.versions.length;
+  elements.askCompareButton.disabled = isLoading || !state.compareId;
+  elements.compareQuestionInput.disabled = isLoading || !state.compareId;
+  if (isLoading) {
+    setBranchStatus("info", message || "Working...");
+  }
+}
+
+function setBranchStatus(kind, text) {
+  if (!kind || !text) {
+    elements.branchStatus.className = "cache-indicator hidden";
+    elements.branchStatus.textContent = "";
+    return;
+  }
+  elements.branchStatus.className = `cache-indicator ${kind}`;
+  elements.branchStatus.textContent = text;
+}
+
+function formatCompareStatus(status) {
+  if (!status) return "Unknown";
+  return status
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatVersionOption(version) {
+  const date = version.date ? new Date(version.date) : null;
+  const dateLabel = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString() : version.date;
+  return `${version.short_sha || version.sha.slice(0, 7)} - ${version.message || "Commit"}${dateLabel ? ` (${dateLabel})` : ""}`;
+}
+
+function selectedOptionText(select) {
+  return select.options[select.selectedIndex]?.textContent || select.value;
 }
 
 function renderRepoSummary(summary, analyzePayload = null) {
@@ -470,30 +921,101 @@ function buildCriticalPath(path) {
   return row;
 }
 
-function renderAnswer(answer) {
-  elements.answerEmpty.classList.add("hidden");
-  elements.answerContent.classList.remove("hidden");
-  elements.answerText.replaceChildren();
-
-  const paragraphs = splitAnswerParagraphs(answer);
-  if (!paragraphs.length && answer.trim()) {
-    paragraphs.push(answer.trim());
-  }
-
-  paragraphs.forEach((paragraph) => {
-    const node = document.createElement("p");
-    node.textContent = paragraph;
-    elements.answerText.appendChild(node);
-  });
-}
-
-function clearAnswer() {
-  elements.answerEmpty.classList.remove("hidden");
-  elements.answerContent.classList.add("hidden");
-  elements.answerText.replaceChildren();
+function handleNewThread() {
+  state.hasConversation = false;
+  elements.chatMessages.querySelectorAll(".chat-exchange").forEach((el) => el.remove());
+  elements.chatMessages.classList.add("hidden");
+  elements.chatIdle.classList.remove("hidden");
+  elements.suggestionsArea.classList.remove("hidden");
+  elements.newThreadButton.classList.add("hidden");
   elements.sourcesEmpty.classList.remove("hidden");
   elements.sourcesList.classList.add("hidden");
   elements.sourcesList.replaceChildren();
+  elements.sourcesCount.classList.add("hidden");
+  elements.sourcesCount.textContent = "";
+  elements.questionInput.value = "";
+  elements.questionInput.focus();
+}
+
+function showThinking(visible) {
+  if (!state.hasConversation) {
+    state.hasConversation = true;
+    elements.chatIdle.classList.add("hidden");
+    elements.chatMessages.classList.remove("hidden");
+    elements.newThreadButton.classList.remove("hidden");
+  }
+  elements.chatThinking.classList.toggle("hidden", !visible);
+  if (visible) {
+    elements.chatBody.scrollTop = elements.chatBody.scrollHeight;
+  }
+}
+
+function appendChatExchange(question, answer) {
+  // First exchange — hide idle, show messages (may already be done by showThinking)
+  if (!state.hasConversation) {
+    state.hasConversation = true;
+    elements.chatIdle.classList.add("hidden");
+    elements.chatMessages.classList.remove("hidden");
+    elements.newThreadButton.classList.remove("hidden");
+  }
+
+  const exchange = document.createElement("div");
+  exchange.className = "chat-exchange";
+
+  // User bubble
+  const userBubble = document.createElement("div");
+  userBubble.className = "chat-bubble--user";
+
+  const userLabel = document.createElement("span");
+  userLabel.className = "thread-role thread-role--user";
+  userLabel.textContent = "You";
+
+  const questionText = document.createElement("p");
+  questionText.className = "thread-question-text";
+  questionText.textContent = question;
+
+  userBubble.append(userLabel, questionText);
+
+  // Assistant bubble
+  const assistantBubble = document.createElement("div");
+  assistantBubble.className = "chat-bubble--assistant";
+
+  const assistantLabel = document.createElement("span");
+  assistantLabel.className = "thread-role thread-role--assistant";
+  assistantLabel.textContent = "Assistant";
+
+  const answerDiv = document.createElement("div");
+  answerDiv.className = "answer-text";
+
+  const paragraphs = splitAnswerParagraphs(answer);
+  if (!paragraphs.length && answer.trim()) paragraphs.push(answer.trim());
+  paragraphs.forEach((paragraph) => {
+    const p = document.createElement("p");
+    p.textContent = paragraph;
+    answerDiv.appendChild(p);
+  });
+
+  assistantBubble.append(assistantLabel, answerDiv);
+  exchange.append(userBubble, assistantBubble);
+  // Insert before the thinking indicator so it stays at the bottom
+  elements.chatMessages.insertBefore(exchange, elements.chatThinking);
+
+  // Scroll to bottom
+  elements.chatBody.scrollTop = elements.chatBody.scrollHeight;
+}
+
+function clearAnswer() {
+  state.hasConversation = false;
+  elements.chatIdle.classList.remove("hidden");
+  elements.chatMessages.querySelectorAll(".chat-exchange").forEach((el) => el.remove());
+  elements.chatMessages.classList.add("hidden");
+  elements.chatThinking.classList.add("hidden");
+  elements.newThreadButton.classList.add("hidden");
+  elements.sourcesEmpty.classList.remove("hidden");
+  elements.sourcesList.classList.add("hidden");
+  elements.sourcesList.replaceChildren();
+  elements.sourcesCount.classList.add("hidden");
+  elements.sourcesCount.textContent = "";
 }
 
 function clearRepoSummary() {
@@ -513,6 +1035,21 @@ function clearRepoSummary() {
   renderPathGroup(elements.inferenceFiles, []);
   renderPathGroup(elements.configFiles, []);
   renderPathGroup(elements.dataFiles, []);
+  // Reset suggestions
+  elements.suggestionsArea.classList.add("hidden");
+  elements.queryHint.textContent = "Analyze a repository to start asking questions.";
+  // Reset history
+  elements.historyPanel.classList.add("hidden");
+  elements.historyHeadSha.textContent = "";
+  elements.changesBanner.classList.add("hidden");
+  elements.changesBanner.replaceChildren();
+  elements.commitList.classList.add("hidden");
+  elements.commitList.replaceChildren();
+  enableCompareWorkspace(false);
+  resetCompareResult();
+  state.versions = [];
+  state.firstCommit = null;
+  state.versionsLoadedFor = "";
 }
 
 function renderSources(sources) {
@@ -521,41 +1058,98 @@ function renderSources(sources) {
   if (!sources.length) {
     elements.sourcesEmpty.classList.remove("hidden");
     elements.sourcesList.classList.add("hidden");
+    elements.sourcesCount.classList.add("hidden");
     return;
   }
 
   elements.sourcesEmpty.classList.add("hidden");
   elements.sourcesList.classList.remove("hidden");
+  elements.sourcesCount.classList.remove("hidden");
+  elements.sourcesCount.textContent = `${sources.length} source${sources.length !== 1 ? "s" : ""}`;
 
-  sources.forEach((source) => {
+  sources.forEach((source, index) => {
     const card = document.createElement("article");
     card.className = "source-card";
 
-    const header = document.createElement("div");
-    header.className = "source-header";
+    // ── Top section ──
+    const top = document.createElement("div");
+    top.className = "source-card-top";
 
-    const title = document.createElement("h3");
-    title.className = "source-title";
-    title.textContent = source.file_path;
+    // File row: citation number + path
+    const fileRow = document.createElement("div");
+    fileRow.className = "source-file-row";
 
-    const meta = document.createElement("div");
-    meta.className = "source-meta";
+    const num = document.createElement("span");
+    num.className = "source-citation-num";
+    num.textContent = index + 1;
 
-    meta.appendChild(buildPill(source.chunk_type));
-    meta.appendChild(buildPill(formatLineRange(source.start_line, source.end_line)));
-    meta.appendChild(buildPill(`score ${Number(source.score).toFixed(2)}`));
+    const filePath = document.createElement("p");
+    filePath.className = "source-file-path";
+    filePath.textContent = source.file_path;
+    filePath.title = source.file_path;
 
-    header.append(title, meta);
+    fileRow.append(num, filePath);
+    top.appendChild(fileRow);
 
-    card.appendChild(header);
+    // Badges: language, chunk type, line range
+    const badges = document.createElement("div");
+    badges.className = "source-badges";
+
+    if (source.language) {
+      const langBadge = document.createElement("span");
+      langBadge.className = "source-badge source-badge--lang";
+      langBadge.dataset.lang = source.language;
+      langBadge.textContent = source.language;
+      badges.appendChild(langBadge);
+    }
+
+    const typeBadge = document.createElement("span");
+    typeBadge.className = "source-badge source-badge--type";
+    typeBadge.textContent = source.chunk_type.replace(/_/g, " ");
+    badges.appendChild(typeBadge);
+
+    if (source.start_line || source.end_line) {
+      const linesBadge = document.createElement("span");
+      linesBadge.className = "source-badge source-badge--lines";
+      linesBadge.textContent = formatLineRange(source.start_line, source.end_line);
+      badges.appendChild(linesBadge);
+    }
+
+    top.appendChild(badges);
 
     if (source.short_summary) {
       const summary = document.createElement("p");
-      summary.className = "source-summary";
+      summary.className = "source-summary-text";
       summary.textContent = source.short_summary;
-      card.appendChild(summary);
+      top.appendChild(summary);
     }
 
+    card.appendChild(top);
+
+    // ── Score bar ──
+    const scoreRow = document.createElement("div");
+    scoreRow.className = "source-score-row";
+
+    const scoreLabel = document.createElement("span");
+    scoreLabel.className = "source-score-label";
+    scoreLabel.textContent = "Relevance";
+
+    const barWrap = document.createElement("div");
+    barWrap.className = "source-score-bar-wrap";
+
+    const bar = document.createElement("div");
+    bar.className = "source-score-bar";
+    bar.style.width = `${Math.min(Number(source.score) * 100, 100).toFixed(1)}%`;
+    barWrap.appendChild(bar);
+
+    const scoreVal = document.createElement("span");
+    scoreVal.className = "source-score-value";
+    scoreVal.textContent = Number(source.score).toFixed(2);
+
+    scoreRow.append(scoreLabel, barWrap, scoreVal);
+    card.appendChild(scoreRow);
+
+    // ── Code snippet ──
     const snippet = document.createElement("pre");
     snippet.className = "source-snippet";
     snippet.textContent = source.snippet;
@@ -616,6 +1210,9 @@ function setLoading(isLoading, message = "") {
   elements.clearCacheButton.disabled = isLoading;
   elements.askButton.disabled = isLoading || !state.repoUrl;
   elements.questionInput.disabled = isLoading || !state.repoUrl;
+  document.querySelectorAll(".suggestion-card").forEach((card) => {
+    card.disabled = isLoading || !state.repoUrl;
+  });
 
   if (isLoading) {
     setStatus("loading", message || "Working...");
@@ -736,4 +1333,414 @@ function capitalizeFirst(value) {
     return value;
   }
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+// ---- Version History ----
+
+function renderHistory(headSha, commits, changes, activitySummary = "") {
+  elements.historyPanel.classList.remove("hidden");
+
+  // HEAD SHA chip
+  elements.historyHeadSha.textContent = headSha ? `HEAD ${headSha.slice(0, 7)}` : "";
+
+  // Changes banner
+  if (changes) {
+    renderChangesBanner(changes);
+    elements.changesBanner.classList.remove("hidden");
+  } else {
+    elements.changesBanner.classList.add("hidden");
+    elements.changesBanner.replaceChildren();
+  }
+
+  // Commit list (Timeline pane)
+  elements.commitList.replaceChildren();
+  if (!commits || commits.length === 0) {
+    elements.commitListEmpty.classList.remove("hidden");
+    elements.commitList.classList.add("hidden");
+  } else {
+    elements.commitListEmpty.classList.add("hidden");
+    elements.commitList.classList.remove("hidden");
+    commits.forEach((commit) => {
+      elements.commitList.appendChild(buildCommitItem(commit));
+    });
+  }
+
+  // Activity Flow pane
+  renderActivityFlow(commits, activitySummary);
+}
+
+function renderChangesBanner(changes) {
+  elements.changesBanner.replaceChildren();
+
+  const title = document.createElement("p");
+  title.className = "changes-banner-title";
+  title.textContent = "Changes detected since last analysis";
+  elements.changesBanner.appendChild(title);
+
+  const stats = document.createElement("div");
+  stats.className = "changes-stats";
+
+  stats.appendChild(buildChangesStat("files", `${changes.files_changed} file${changes.files_changed !== 1 ? "s" : ""} changed`));
+  if ((changes.files_added ?? 0) > 0) {
+    stats.appendChild(buildChangesStat("added", `+${changes.files_added} new file${changes.files_added !== 1 ? "s" : ""}`));
+  }
+  if ((changes.files_removed ?? 0) > 0) {
+    stats.appendChild(buildChangesStat("removed", `−${changes.files_removed} deleted file${changes.files_removed !== 1 ? "s" : ""}`));
+  }
+  if ((changes.files_modified ?? 0) > 0) {
+    stats.appendChild(buildChangesStat("files", `${changes.files_modified} modified`));
+  }
+  elements.changesBanner.appendChild(stats);
+
+  const shaRange = document.createElement("p");
+  shaRange.className = "changes-sha-range";
+  shaRange.textContent = `${changes.old_sha.slice(0, 7)} → ${changes.new_sha.slice(0, 7)}`;
+  elements.changesBanner.appendChild(shaRange);
+
+  if (changes.changed_files && changes.changed_files.length > 0) {
+    const label = document.createElement("p");
+    label.className = "changes-files-label";
+    label.textContent = "Modified files";
+    elements.changesBanner.appendChild(label);
+
+    const fileList = document.createElement("div");
+    fileList.className = "changes-files-list";
+    const visible = changes.changed_files.slice(0, 12);
+    const overflow = changes.changed_files.slice(12);
+
+    visible.forEach((filePath) => {
+      const chip = document.createElement("span");
+      chip.className = "changes-file-chip";
+      chip.textContent = filePath;
+      fileList.appendChild(chip);
+    });
+
+    if (overflow.length > 0) {
+      const more = document.createElement("span");
+      more.className = "changes-file-chip";
+      more.style.cursor = "pointer";
+      more.style.color = "var(--teal)";
+      more.textContent = `+${overflow.length} more`;
+      more.addEventListener("click", () => {
+        overflow.forEach((filePath) => {
+          const chip = document.createElement("span");
+          chip.className = "changes-file-chip";
+          chip.textContent = filePath;
+          fileList.insertBefore(chip, more);
+        });
+        more.remove();
+      });
+      fileList.appendChild(more);
+    }
+
+    elements.changesBanner.appendChild(fileList);
+  }
+}
+
+function buildChangesStat(kind, text) {
+  const el = document.createElement("span");
+  el.className = `changes-stat ${kind}`;
+  el.textContent = text;
+  return el;
+}
+
+// ---- Activity Flow ----
+
+function renderActivityFlow(commits, activitySummary) {
+  // Activity summary
+  if (activitySummary && activitySummary.trim()) {
+    elements.activitySummaryText.textContent = activitySummary.trim();
+    elements.activitySummaryBlock.classList.remove("hidden");
+  } else {
+    elements.activitySummaryBlock.classList.add("hidden");
+  }
+
+  elements.activityFlow.replaceChildren();
+
+  if (!commits || commits.length === 0) {
+    elements.activityFlowEmpty.classList.remove("hidden");
+    elements.activityFlow.classList.add("hidden");
+    return;
+  }
+
+  elements.activityFlowEmpty.classList.add("hidden");
+  elements.activityFlow.classList.remove("hidden");
+
+  commits.forEach((commit, index) => {
+    elements.activityFlow.appendChild(buildFlowCommit(commit, index === commits.length - 1));
+  });
+}
+
+function buildFlowCommit(commit, isLast) {
+  const block = document.createElement("div");
+  block.className = "flow-commit";
+
+  // Left: vertical track (dot + line)
+  const track = document.createElement("div");
+  track.className = "flow-track";
+
+  const dot = document.createElement("div");
+  dot.className = "flow-dot";
+  track.appendChild(dot);
+
+  if (!isLast) {
+    const line = document.createElement("div");
+    line.className = "flow-line";
+    track.appendChild(line);
+  }
+
+  // Right: content
+  const content = document.createElement("div");
+  content.className = "flow-content";
+
+  // Header row: SHA badge + message + date
+  const headerRow = document.createElement("div");
+  headerRow.className = "flow-header-row";
+
+  const sha = document.createElement("span");
+  sha.className = "commit-sha-badge";
+  sha.textContent = commit.short_sha || commit.sha.slice(0, 7);
+
+  const msg = document.createElement("p");
+  msg.className = "flow-message";
+  msg.textContent = commit.message;
+
+  const date = document.createElement("span");
+  date.className = "commit-date";
+  date.textContent = formatRelativeDate(commit.date);
+  date.title = `${commit.author_name} · ${commit.date}`;
+
+  headerRow.append(sha, msg, date);
+  content.appendChild(headerRow);
+
+  // File change badges
+  const fileChanges = commit.file_changes || [];
+  if (fileChanges.length > 0) {
+    const filesRow = document.createElement("div");
+    filesRow.className = "flow-files";
+
+    const MAX_VISIBLE = 6;
+    const visible = fileChanges.slice(0, MAX_VISIBLE);
+    const overflow = fileChanges.slice(MAX_VISIBLE);
+
+    visible.forEach((fc) => {
+      const badge = document.createElement("span");
+      badge.className = `flow-file-badge flow-file-badge--${fc.status}`;
+      badge.textContent = getFileName(fc.path);
+      badge.title = `${fc.status}: ${fc.path}`;
+      filesRow.appendChild(badge);
+    });
+
+    if (overflow.length > 0) {
+      const more = document.createElement("span");
+      more.className = "flow-file-badge flow-file-badge--more";
+      more.textContent = `+${overflow.length} more`;
+      more.title = overflow.map((f) => f.path).join("\n");
+      filesRow.appendChild(more);
+    }
+
+    content.appendChild(filesRow);
+  }
+
+  // Per-commit LLM explanation
+  if (commit.summary && commit.summary.trim()) {
+    const explanation = document.createElement("p");
+    explanation.className = "flow-commit-summary";
+    explanation.textContent = commit.summary.trim();
+    content.appendChild(explanation);
+  }
+
+  block.append(track, content);
+  return block;
+}
+
+function buildCommitItem(commit) {
+  const item = document.createElement("div");
+  item.className = "commit-item";
+
+  const sha = document.createElement("span");
+  sha.className = "commit-sha-badge";
+  sha.textContent = commit.short_sha || commit.sha.slice(0, 7);
+
+  const body = document.createElement("div");
+  body.className = "commit-body";
+
+  const msg = document.createElement("p");
+  msg.className = "commit-msg";
+  msg.textContent = commit.message;
+
+  const author = document.createElement("p");
+  author.className = "commit-author";
+  author.textContent = commit.author_name;
+
+  body.append(msg, author);
+
+  const date = document.createElement("span");
+  date.className = "commit-date";
+  date.textContent = formatRelativeDate(commit.date);
+  date.title = commit.date;
+
+  item.append(sha, body, date);
+  return item;
+}
+
+function formatRelativeDate(dateStr) {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffMonths = Math.floor(diffDays / 30);
+  const diffYears = Math.floor(diffDays / 365);
+
+  if (diffSecs < 60) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 30) return `${diffDays}d ago`;
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return `${diffYears}y ago`;
+}
+
+// ---- Onboarding ----
+
+const AVATAR_COLORS = [
+  { bg: "rgba(40,122,120,0.16)", color: "#287a78" },
+  { bg: "rgba(198,91,56,0.14)", color: "#c65b38" },
+  { bg: "rgba(80,60,140,0.14)", color: "#3d2e6e" },
+  { bg: "rgba(23,50,74,0.12)", color: "#17324a" },
+  { bg: "rgba(40,100,180,0.14)", color: "#1a5499" },
+  { bg: "rgba(140,80,40,0.14)", color: "#7a4a20" },
+];
+
+async function handleGenerateOnboarding() {
+  if (!state.repoUrl) return;
+
+  elements.onboardingEmpty.classList.add("hidden");
+  elements.onboardingContent.classList.add("hidden");
+  elements.onboardingLoading.classList.remove("hidden");
+  elements.generateOnboardingButton.disabled = true;
+
+  try {
+    const response = await fetch(`/onboarding?repo_url=${encodeURIComponent(state.repoUrl)}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "Failed to generate onboarding guide.");
+    renderOnboarding(payload);
+  } catch (err) {
+    elements.onboardingLoading.classList.add("hidden");
+    elements.onboardingEmpty.classList.remove("hidden");
+    elements.onboardingEmpty.textContent = err.message || "Failed to generate guide.";
+  } finally {
+    elements.generateOnboardingButton.disabled = false;
+  }
+}
+
+function renderOnboarding(data) {
+  elements.onboardingLoading.classList.add("hidden");
+  elements.onboardingEmpty.classList.add("hidden");
+
+  // Reading order
+  elements.onboardingReadingOrder.replaceChildren();
+  (data.reading_order || []).forEach((step) => {
+    const row = document.createElement("div");
+    row.className = "reading-step";
+
+    const num = document.createElement("div");
+    num.className = "reading-step-number";
+    num.textContent = step.step;
+
+    const body = document.createElement("div");
+    body.className = "reading-step-body";
+
+    const file = document.createElement("p");
+    file.className = "reading-step-file";
+    file.textContent = step.file_path;
+
+    const reason = document.createElement("p");
+    reason.className = "reading-step-reason";
+    reason.textContent = step.reason;
+
+    body.append(file, reason);
+
+    const role = document.createElement("span");
+    role.className = "reading-step-role";
+    role.textContent = step.role;
+
+    row.append(num, body, role);
+    elements.onboardingReadingOrder.appendChild(row);
+  });
+
+  // Core concepts
+  elements.onboardingConcepts.replaceChildren();
+  (data.core_concepts || []).forEach((concept) => {
+    const card = document.createElement("div");
+    card.className = "concept-card";
+
+    const name = document.createElement("p");
+    name.className = "concept-name";
+    name.textContent = concept.name;
+
+    const desc = document.createElement("p");
+    desc.className = "concept-description";
+    desc.textContent = concept.description;
+
+    card.append(name, desc);
+
+    if (concept.key_files && concept.key_files.length) {
+      const chips = document.createElement("div");
+      chips.className = "concept-files";
+      concept.key_files.slice(0, 4).forEach((f) => {
+        const chip = document.createElement("span");
+        chip.className = "concept-file-chip";
+        chip.textContent = f;
+        chips.appendChild(chip);
+      });
+      card.appendChild(chips);
+    }
+
+    elements.onboardingConcepts.appendChild(card);
+  });
+
+  // Contributors
+  elements.onboardingContributors.replaceChildren();
+  (data.contributors || []).forEach((contributor, index) => {
+    const colors = AVATAR_COLORS[index % AVATAR_COLORS.length];
+    const card = document.createElement("div");
+    card.className = "contributor-card";
+
+    const avatar = document.createElement("div");
+    avatar.className = "contributor-avatar";
+    avatar.style.background = colors.bg;
+    avatar.style.color = colors.color;
+    avatar.style.border = `2px solid ${colors.bg}`;
+    avatar.textContent = contributor.name.slice(0, 2).toUpperCase();
+
+    const info = document.createElement("div");
+
+    const name = document.createElement("p");
+    name.className = "contributor-name";
+    name.textContent = contributor.name;
+
+    const meta = document.createElement("div");
+    meta.className = "contributor-meta";
+    meta.innerHTML = `<span>${contributor.commits} commit${contributor.commits !== 1 ? "s" : ""}</span><span class="contributor-divider">·</span><span>${contributor.focus_area}</span>`;
+
+    info.append(name, meta);
+    card.append(avatar, info);
+    elements.onboardingContributors.appendChild(card);
+  });
+
+  // Complexity note
+  if (data.complexity_note && data.complexity_note.trim()) {
+    elements.onboardingComplexityText.textContent = data.complexity_note.trim();
+    elements.onboardingComplexity.classList.remove("hidden");
+  } else {
+    elements.onboardingComplexity.classList.add("hidden");
+  }
+
+  elements.onboardingContent.classList.remove("hidden");
 }
