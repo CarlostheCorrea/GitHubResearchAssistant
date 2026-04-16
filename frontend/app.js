@@ -93,6 +93,27 @@ const elements = {
   onboardingContributors: document.getElementById("onboarding-contributors"),
   onboardingComplexity: document.getElementById("onboarding-complexity"),
   onboardingComplexityText: document.getElementById("onboarding-complexity-text"),
+  mapTabButton: document.getElementById("map-tab-button"),
+  generateMapButton: document.getElementById("generate-map-button"),
+  mapSearch: document.getElementById("map-search"),
+  mapClusterToggle: document.getElementById("map-cluster-toggle"),
+  mapEmpty: document.getElementById("map-empty"),
+  mapLoading: document.getElementById("map-loading"),
+  mapWorkspace: document.getElementById("map-workspace"),
+  mapSvg: document.getElementById("map-svg"),
+  mapSidePanel: document.getElementById("map-side-panel"),
+  mapSideClose: document.getElementById("map-side-close"),
+  mapSidePath: document.getElementById("map-side-path"),
+  mapSideLang: document.getElementById("map-side-lang"),
+  mapSideRole: document.getElementById("map-side-role"),
+  mapSideLines: document.getElementById("map-side-lines"),
+  mapSideSummary: document.getElementById("map-side-summary"),
+  mapSideSymbols: document.getElementById("map-side-symbols"),
+  mapSideImportsLabel: document.getElementById("map-side-imports-label"),
+  mapSideImports: document.getElementById("map-side-imports"),
+  mapSideImportedByLabel: document.getElementById("map-side-importedby-label"),
+  mapSideImportedBy: document.getElementById("map-side-importedby"),
+  mapLegend: document.getElementById("map-legend"),
 };
 
 elements.analyzeForm.addEventListener("submit", handleAnalyze);
@@ -113,6 +134,9 @@ document.querySelectorAll(".history-subtab").forEach((btn) => {
 elements.qaTabButton.addEventListener("click", () => switchWorkspaceTab("qa"));
 elements.compareTabButton.addEventListener("click", () => switchWorkspaceTab("compare"));
 elements.onboardingTabButton.addEventListener("click", () => switchWorkspaceTab("onboarding"));
+elements.mapTabButton.addEventListener("click", () => switchWorkspaceTab("map"));
+elements.generateMapButton.addEventListener("click", handleGenerateMap);
+elements.mapSideClose.addEventListener("click", () => elements.mapSidePanel.classList.add("hidden"));
 elements.generateOnboardingButton.addEventListener("click", handleGenerateOnboarding);
 elements.refreshBranchesButton.addEventListener("click", () => loadVersions(true));
 elements.versionPresetSelect.addEventListener("change", applyVersionPreset);
@@ -174,6 +198,7 @@ async function handleAnalyze(event) {
     elements.questionInput.disabled = false;
     elements.askButton.disabled = false;
     elements.generateOnboardingButton.disabled = false;
+    elements.generateMapButton.disabled = false;
     elements.queryHint.textContent = `Grounded answers with cited sources from ${payload.repo_summary.repo_name}.`;
     if (!state.hasConversation) {
       elements.suggestionsArea.classList.remove("hidden");
@@ -291,9 +316,11 @@ function switchWorkspaceTab(tabName) {
   elements.qaTabButton.classList.toggle("active", tabName === "qa");
   elements.compareTabButton.classList.toggle("active", tabName === "compare");
   elements.onboardingTabButton.classList.toggle("active", tabName === "onboarding");
+  elements.mapTabButton.classList.toggle("active", tabName === "map");
   elements.qaTabButton.setAttribute("aria-selected", String(tabName === "qa"));
   elements.compareTabButton.setAttribute("aria-selected", String(tabName === "compare"));
   elements.onboardingTabButton.setAttribute("aria-selected", String(tabName === "onboarding"));
+  elements.mapTabButton.setAttribute("aria-selected", String(tabName === "map"));
 
   elements.workspacePanels.forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.workspaceTab !== tabName);
@@ -655,11 +682,13 @@ function renderGlobalContext(summary) {
   elements.summaryGlobalContext.replaceChildren();
   elements.summaryGlobalContext.dataset.state = summary.global_context?.trim() ? "generated" : "fallback";
 
+  // Use stored dependency_links.length as the canonical dependency count —
+  // dependencyCount is regex-extracted from narrative text and can disagree.
+  const storedEdgeCount = graphContext.dependencyLinks.length;
   const metrics = document.createElement("div");
   metrics.className = "graph-context-grid";
   metrics.appendChild(buildGraphMetric("Symbols", String(graphContext.symbolCount)));
-  metrics.appendChild(buildGraphMetric("Dependencies", String(graphContext.dependencyCount)));
-  metrics.appendChild(buildGraphMetric("File Links", String(graphContext.dependencyLinks.length)));
+  metrics.appendChild(buildGraphMetric("Dependencies", String(storedEdgeCount)));
   elements.summaryGlobalContext.appendChild(metrics);
 
   const pathSection = document.createElement("div");
@@ -667,7 +696,7 @@ function renderGlobalContext(summary) {
 
   const pathTitle = document.createElement("p");
   pathTitle.className = "graph-section-label";
-  pathTitle.textContent = graphContext.criticalPaths.length ? "Critical Paths" : "Key File Links";
+  pathTitle.textContent = "Key Dependencies";
   pathSection.appendChild(pathTitle);
 
   if (graphContext.criticalPaths.length) {
@@ -1743,4 +1772,413 @@ function renderOnboarding(data) {
   }
 
   elements.onboardingContent.classList.remove("hidden");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Repository Map — D3 Force-Directed Dependency Graph
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LANG_COLORS = {
+  python:     "#3776ab",
+  javascript: "#f0db4f",
+  typescript: "#3178c6",
+  go:         "#00add8",
+  rust:       "#ce422b",
+  java:       "#ed8b00",
+  cpp:        "#6295cb",
+  c:          "#555599",
+  ruby:       "#cc342d",
+  html:       "#e34c26",
+  css:        "#264de4",
+  markdown:   "#8b949e",
+  json:       "#40a040",
+  yaml:       "#cb171e",
+  unknown:    "#8b949e",
+};
+
+function nodeRadius(d) {
+  // Minimum 22px so circles are always clearly readable; scale with line count
+  return Math.min(46, Math.max(22, Math.sqrt(d.line_count / 1.8)));
+}
+
+let mapState = {
+  nodes: [],
+  edges: [],
+  simulation: null,
+  clusterOn: false,
+  selectedId: null,
+  zoomBehavior: null,
+  svgG: null,        // the inner <g> that zoom transforms
+};
+
+async function handleGenerateMap() {
+  if (!state.repoUrl) return;
+  elements.mapEmpty.classList.add("hidden");
+  elements.mapWorkspace.classList.add("hidden");
+  elements.mapLoading.classList.remove("hidden");
+  elements.mapSearch.disabled = true;
+  elements.mapClusterToggle.disabled = true;
+
+  try {
+    const resp = await fetch(`/repo-map?repo_url=${encodeURIComponent(state.repoUrl)}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Failed to generate map.");
+    elements.mapLoading.classList.add("hidden");
+    elements.mapWorkspace.classList.remove("hidden");
+    elements.mapSearch.disabled = false;
+    elements.mapClusterToggle.disabled = false;
+    // Wait one frame so the SVG container has real clientWidth/clientHeight
+    await new Promise(r => requestAnimationFrame(r));
+    renderRepoMap(data);
+  } catch (err) {
+    elements.mapLoading.classList.add("hidden");
+    elements.mapEmpty.classList.remove("hidden");
+    elements.mapEmpty.textContent = err.message || "Failed to generate map.";
+  }
+}
+
+function renderRepoMap(data) {
+  mapState.nodes = data.nodes.map(n => ({ ...n }));
+  mapState.edges = data.edges.map(e => ({ ...e }));
+  mapState.clusterOn = false;
+  mapState.selectedId = null;
+  elements.mapClusterToggle.textContent = "Cluster by directory";
+
+  // Build legend from languages present
+  const langs = [...new Set(mapState.nodes.map(n => n.language))].sort();
+  elements.mapLegend.replaceChildren();
+  langs.forEach(lang => {
+    const item = document.createElement("div");
+    item.className = "map-legend-item";
+    const dot = document.createElement("span");
+    dot.className = "map-legend-dot";
+    dot.style.background = LANG_COLORS[lang] || LANG_COLORS.unknown;
+    const label = document.createElement("span");
+    label.textContent = lang;
+    item.append(dot, label);
+    elements.mapLegend.appendChild(item);
+  });
+
+  // Show node/edge count beneath legend
+  const statsEl = document.getElementById("map-graph-stats");
+  if (statsEl) {
+    statsEl.textContent = `${mapState.nodes.length} files · ${mapState.edges.length} dependencies`;
+  }
+  console.log(`[RepoMap] nodes=${mapState.nodes.length} edges=${mapState.edges.length}`, mapState.edges.slice(0,5));
+
+  buildD3Graph();
+
+  // Search handler
+  elements.mapSearch.oninput = () => {
+    const q = elements.mapSearch.value.trim().toLowerCase();
+    if (!q) return;
+    const match = mapState.nodes.find(n =>
+      n.file_path.toLowerCase().includes(q)
+    );
+    if (match && match.x != null) {
+      const svg = d3.select(elements.mapSvg);
+      const w = elements.mapSvg.clientWidth;
+      const h = elements.mapSvg.clientHeight;
+      svg.transition().duration(600).call(
+        mapState.zoomBehavior.transform,
+        d3.zoomIdentity.translate(w / 2, h / 2).scale(2.2).translate(-match.x, -match.y)
+      );
+      showSidePanel(match);
+    }
+  };
+
+  // Cluster toggle
+  elements.mapClusterToggle.onclick = () => {
+    mapState.clusterOn = !mapState.clusterOn;
+    elements.mapClusterToggle.textContent = mapState.clusterOn
+      ? "Free layout"
+      : "Cluster by directory";
+    applyClusterForce();
+  };
+}
+
+function buildD3Graph() {
+  const svgEl = elements.mapSvg;
+  const wrap = svgEl.parentElement;
+
+  // Measure the actual rendered container — never use 0
+  const w = Math.max(wrap.clientWidth  || wrap.offsetWidth  || 800, 600);
+  const h = Math.max(wrap.clientHeight || wrap.offsetHeight || 620, 500);
+
+  // Set explicit SVG dimensions so the element fills the space
+  svgEl.setAttribute("width",  w);
+  svgEl.setAttribute("height", h);
+
+  // Clear previous render
+  d3.select(svgEl).selectAll("*").remove();
+  elements.mapSidePanel.classList.add("hidden");
+
+  const svg = d3.select(svgEl);
+
+  // Arrowhead sits at the line endpoint (already clipped to node edge)
+  svg.append("defs").append("marker")
+    .attr("id", "arrowhead")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 8)
+    .attr("refY", 0)
+    .attr("markerWidth", 7)
+    .attr("markerHeight", 7)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("d", "M0,-5L10,0L0,5")
+    .attr("fill", "#8da7c4");
+
+  const g = svg.append("g");
+  mapState.svgG = g;
+
+  // Zoom
+  const zoom = d3.zoom()
+    .scaleExtent([0.1, 8])
+    .on("zoom", (event) => g.attr("transform", event.transform));
+  mapState.zoomBehavior = zoom;
+  svg.call(zoom);
+
+  // ── Pre-spread nodes in a circle so simulation starts with room to breathe ──
+  const n = mapState.nodes.length;
+  const spreadR = Math.min(w, h) * 0.38;
+  mapState.nodes.forEach((d, i) => {
+    const angle = (i / n) * 2 * Math.PI;
+    d.x = w / 2 + spreadR * Math.cos(angle);
+    d.y = h / 2 + spreadR * Math.sin(angle);
+  });
+
+  // Edges (drawn first so nodes render on top)
+  const link = g.append("g").attr("class", "links")
+    .selectAll("line")
+    .data(mapState.edges)
+    .join("line")
+    .attr("class", "map-link")
+    .attr("marker-end", "url(#arrowhead)");
+
+  // Nodes
+  const node = g.append("g").attr("class", "nodes")
+    .selectAll("g")
+    .data(mapState.nodes)
+    .join("g")
+    .attr("class", "map-node")
+    .call(d3.drag()
+      .on("start", (event, d) => {
+        if (!event.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on("end", (event, d) => {
+        if (!event.active) sim.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      })
+    );
+
+  // Circle — large enough to always be visible
+  node.append("circle")
+    .attr("r", d => nodeRadius(d))
+    .attr("fill", d => LANG_COLORS[d.language] || LANG_COLORS.unknown);
+
+  // Filename label below the node
+  node.append("text")
+    .attr("dy", d => nodeRadius(d) + 15)
+    .attr("text-anchor", "middle")
+    .text(d => {
+      const name = d.file_path.split("/").pop();
+      return name.length > 22 ? name.slice(0, 20) + "…" : name;
+    });
+
+  // ── Hover: highlight only direct neighbors ──
+  const linkedSet = (d, edgesArr) => {
+    const neighbors = new Set([d.id]);
+    edgesArr.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (sid === d.id) neighbors.add(tid);
+      if (tid === d.id) neighbors.add(sid);
+    });
+    return neighbors;
+  };
+
+  node
+    .on("mouseenter", (event, d) => {
+      const neighbors = linkedSet(d, mapState.edges);
+      node.classed("dimmed", n => !neighbors.has(n.id));
+      link.classed("dimmed", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return sid !== d.id && tid !== d.id;
+      });
+      link.classed("highlighted", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return sid === d.id || tid === d.id;
+      });
+    })
+    .on("mouseleave", () => {
+      node.classed("dimmed", false);
+      link.classed("dimmed", false).classed("highlighted", false);
+    })
+    .on("click", (event, d) => {
+      event.stopPropagation();
+      mapState.selectedId = d.id;
+      node.classed("selected", n => n.id === d.id);
+      showSidePanel(d);
+    });
+
+  svg.on("click", () => {
+    node.classed("selected", false);
+    elements.mapSidePanel.classList.add("hidden");
+    mapState.selectedId = null;
+  });
+
+  // ── Force simulation ──
+  // High charge pushes nodes apart; strong link pulls connected ones close
+  const sim = d3.forceSimulation(mapState.nodes)
+    .force("link", d3.forceLink(mapState.edges)
+      .id(d => d.id)
+      .distance(110)
+      .strength(0.7))
+    .force("charge", d3.forceManyBody().strength(-500))
+    .force("center", d3.forceCenter(w / 2, h / 2).strength(0.05))
+    .force("collide", d3.forceCollide(d => nodeRadius(d) + 14))
+    .alphaDecay(0.025)     // slower decay → more time to settle
+    .on("tick", () => {
+      // Draw lines from source-node-edge to target-node-edge (not center)
+      // so the arrowhead sits cleanly at the circle boundary
+      link
+        .attr("x1", d => {
+          const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return d.source.x + (dx / dist) * (nodeRadius(d.source) + 2);
+        })
+        .attr("y1", d => {
+          const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return d.source.y + (dy / dist) * (nodeRadius(d.source) + 2);
+        })
+        .attr("x2", d => {
+          const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return d.target.x - (dx / dist) * (nodeRadius(d.target) + 2);
+        })
+        .attr("y2", d => {
+          const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return d.target.y - (dy / dist) * (nodeRadius(d.target) + 2);
+        });
+      node.attr("transform", d => `translate(${d.x},${d.y})`);
+    })
+    .on("end", () => {
+      // Auto-zoom to fit all nodes with 5% padding
+      const bounds = g.node().getBBox();
+      if (bounds.width === 0 || bounds.height === 0) return;
+      const pad = 60;
+      const scale = Math.min(
+        (w - pad * 2) / bounds.width,
+        (h - pad * 2) / bounds.height,
+        1.4
+      );
+      const tx = w / 2 - scale * (bounds.x + bounds.width  / 2);
+      const ty = h / 2 - scale * (bounds.y + bounds.height / 2);
+      svg.transition().duration(900).ease(d3.easeCubicOut).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+    });
+
+  mapState.simulation = sim;
+  mapState._link = link;
+  mapState._node = node;
+}
+
+function applyClusterForce() {
+  if (!mapState.simulation) return;
+  if (mapState.clusterOn) {
+    // Compute directory centroids
+    const dirs = [...new Set(mapState.nodes.map(n => n.file_path.split("/")[0]))];
+    const w = elements.mapSvg.clientWidth || 900;
+    const h = elements.mapSvg.clientHeight || 550;
+    const cols = Math.ceil(Math.sqrt(dirs.length));
+    const centroids = {};
+    dirs.forEach((dir, i) => {
+      centroids[dir] = {
+        x: (i % cols + 0.5) * (w / cols),
+        y: (Math.floor(i / cols) + 0.5) * (h / Math.ceil(dirs.length / cols)),
+      };
+    });
+    mapState.simulation
+      .force("x", d3.forceX(d => {
+        const dir = d.file_path.split("/")[0];
+        return centroids[dir]?.x ?? w / 2;
+      }).strength(0.12))
+      .force("y", d3.forceY(d => {
+        const dir = d.file_path.split("/")[0];
+        return centroids[dir]?.y ?? h / 2;
+      }).strength(0.12));
+  } else {
+    mapState.simulation.force("x", null).force("y", null);
+  }
+  mapState.simulation.alpha(0.6).restart();
+}
+
+function showSidePanel(d) {
+  elements.mapSidePath.textContent = d.file_path;
+  elements.mapSideLang.textContent = d.language;
+  elements.mapSideRole.textContent = d.role || "general";
+  elements.mapSideLines.textContent = `~${d.line_count} lines`;
+  elements.mapSideSummary.textContent = d.short_summary || "";
+
+  elements.mapSideSymbols.replaceChildren();
+  (d.key_symbols || []).forEach(sym => {
+    const chip = document.createElement("span");
+    chip.className = "map-side-symbol";
+    chip.textContent = sym;
+    elements.mapSideSymbols.appendChild(chip);
+  });
+
+  // Connections
+  const imports = mapState.edges
+    .filter(e => (typeof e.source === "object" ? e.source.id : e.source) === d.id)
+    .map(e => typeof e.target === "object" ? e.target.id : e.target);
+  const importedBy = mapState.edges
+    .filter(e => (typeof e.target === "object" ? e.target.id : e.target) === d.id)
+    .map(e => typeof e.source === "object" ? e.source.id : e.source);
+
+  const renderConnList = (container, labelEl, label, paths) => {
+    container.replaceChildren();
+    if (paths.length === 0) {
+      labelEl.textContent = "";
+      return;
+    }
+    labelEl.textContent = `${label} (${paths.length})`;
+    paths.slice(0, 6).forEach(p => {
+      const item = document.createElement("div");
+      item.className = "map-side-conn-item";
+      item.textContent = p;
+      item.title = p;
+      item.onclick = (ev) => {
+        ev.stopPropagation();
+        const target = mapState.nodes.find(n => n.id === p);
+        if (target && target.x != null) {
+          const svgEl = elements.mapSvg;
+          const w = svgEl.clientWidth;
+          const h = svgEl.clientHeight;
+          d3.select(svgEl).transition().duration(500).call(
+            mapState.zoomBehavior.transform,
+            d3.zoomIdentity.translate(w / 2, h / 2).scale(2.0).translate(-target.x, -target.y)
+          );
+          if (mapState._node) {
+            mapState._node.classed("selected", n => n.id === p);
+          }
+          showSidePanel(target);
+        }
+      };
+      container.appendChild(item);
+    });
+  };
+
+  renderConnList(elements.mapSideImports, elements.mapSideImportsLabel, "Imports", imports);
+  renderConnList(elements.mapSideImportedBy, elements.mapSideImportedByLabel, "Imported by", importedBy);
+
+  elements.mapSidePanel.classList.remove("hidden");
 }

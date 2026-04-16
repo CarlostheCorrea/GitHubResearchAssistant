@@ -66,6 +66,53 @@ class LLMJudgeService:
         self.settings = settings
         self._client: OpenAI | None = None
 
+    def review_and_revise_with_context(
+        self,
+        question: str,
+        draft_answer: str,
+        context_text: str,
+    ) -> str:
+        """Judge pass for answers grounded in plain-text context (e.g. a diff)
+        rather than SourceSnippet objects."""
+        logger.info("Running LLM-as-a-Judge (context mode) for question: %s", question)
+        prompt = "\n\n".join([
+            f"Question: {question}",
+            "Draft answer:",
+            draft_answer,
+            "",
+            "Cited evidence (version diff context):",
+            context_text[:6000] if context_text else "No context provided.",
+            "",
+            "Return JSON only.",
+            "Required key: final_answer.",
+            "Optional keys: needs_revision, rationale, groundedness, citation_quality, completeness, insufficiency_handling.",
+        ])
+        try:
+            client = self._get_client()
+            completion = client.chat.completions.create(
+                model=self.settings.openai_chat_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("LLM judge (context mode) API failure; falling back to draft.", exc_info=True)
+            return draft_answer
+
+        content = completion.choices[0].message.content or "{}"
+        try:
+            payload = json.loads(content)
+            normalized, _ = self._normalize_payload(payload)
+            review = JudgeReview.model_validate(normalized)
+            final = review.final_answer.strip()
+            return final if final else draft_answer
+        except Exception:  # noqa: BLE001
+            logger.warning("LLM judge (context mode) parse failure; falling back to draft.", exc_info=True)
+            return draft_answer
+
     def review_and_revise_answer(
         self,
         question: str,

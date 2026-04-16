@@ -352,3 +352,26 @@ class OnboardingResponse(BaseModel):
     contributors: list[ContributorProfile] = Field(default_factory=list)
     complexity_note: str = ""
     cached: bool = False
+
+
+# ── Repository Map ───────────────────────────────────────────────────────────
+
+class RepoMapNode(BaseModel):
+    id: str            # file path, used as D3 node id
+    file_path: str
+    language: str
+    role: str
+    line_count: int    # estimated from chunk line ranges
+    short_summary: str
+    key_symbols: list[str] = Field(default_factory=list)
+
+
+class RepoMapEdge(BaseModel):
+    source: str        # file_path of importer
+    target: str        # file_path of imported file
+
+
+class RepoMapResponse(BaseModel):
+    repo_name: str
+    nodes: list[RepoMapNode] = Field(default_factory=list)
+    edges: list[RepoMapEdge] = Field(default_factory=list)

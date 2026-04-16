@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI GitHub Research Assistant</title>
-    <link rel="stylesheet" href="/frontend/styles.css?v=11" />
+    <link rel="stylesheet" href="/frontend/styles.css?v=12" />
   </head>
   <body>
     <div class="page-shell">
@@ -171,6 +171,9 @@
             </button>
             <button id="onboarding-tab-button" class="tab-button" type="button" role="tab" aria-selected="false">
               Onboarding
+            </button>
+            <button id="map-tab-button" class="tab-button" type="button" role="tab" aria-selected="false">
+              Repo Map
             </button>
           </div>
         </section>
@@ -399,9 +402,71 @@
 
           </div>
         </section>
+
+        <!-- Repository Map panel -->
+        <section class="panel card map-panel workspace-tab-content hidden" data-workspace-tab="map">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Dependency Graph</p>
+              <h2>Repository Map</h2>
+            </div>
+            <div class="map-controls">
+              <input
+                id="map-search"
+                type="text"
+                class="map-search-input"
+                placeholder="Find file…"
+                disabled
+              />
+              <button id="map-cluster-toggle" type="button" class="secondary-button" disabled>
+                Cluster by directory
+              </button>
+              <button id="generate-map-button" type="button" class="secondary-button" disabled>
+                Generate Map
+              </button>
+            </div>
+          </div>
+
+          <div id="map-empty" class="empty-state">
+            Analyze a repository first, then click "Generate Map" to visualize its dependency graph.
+          </div>
+
+          <div id="map-loading" class="map-loading hidden">
+            <div class="thinking-dots"><span></span><span></span><span></span></div>
+            <p class="map-loading-text">Building dependency graph — parsing imports and resolving file relationships…</p>
+          </div>
+
+          <div id="map-workspace" class="map-workspace hidden">
+            <div class="map-legend-row">
+              <div id="map-legend" class="map-legend"></div>
+              <span id="map-graph-stats" class="map-graph-stats"></span>
+            </div>
+            <div class="map-canvas-wrap">
+              <svg id="map-svg" class="map-svg"></svg>
+              <div id="map-side-panel" class="map-side-panel hidden">
+                <button id="map-side-close" class="map-side-close" type="button" aria-label="Close">✕</button>
+                <p class="map-side-path" id="map-side-path"></p>
+                <div class="map-side-badges">
+                  <span class="map-side-badge map-side-lang" id="map-side-lang"></span>
+                  <span class="map-side-badge map-side-role" id="map-side-role"></span>
+                  <span class="map-side-badge map-side-lines" id="map-side-lines"></span>
+                </div>
+                <p class="map-side-summary" id="map-side-summary"></p>
+                <div id="map-side-symbols" class="map-side-symbols"></div>
+                <div class="map-side-connections">
+                  <p class="map-side-conn-label" id="map-side-imports-label"></p>
+                  <div id="map-side-imports" class="map-side-conn-list"></div>
+                  <p class="map-side-conn-label" id="map-side-importedby-label"></p>
+                  <div id="map-side-importedby" class="map-side-conn-list"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
 
-    <script src="/frontend/app.js?v=11" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="/frontend/app.js?v=12" defer></script>
   </body>
 </html>

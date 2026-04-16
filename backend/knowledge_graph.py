@@ -267,7 +267,7 @@ class KnowledgeGraphService:
                 continue
             prioritized.append([dependency["source_path"], dependency["target_path"]])
             seen.add(edge)
-        return prioritized[:6]
+        return prioritized  # store all edges; display layer can limit as needed
 
     def _shortest_path(
         self,

@@ -31,6 +31,14 @@ EXTENSION_LANGUAGE_MAP = {
     ".h": "c",
     # Scripting
     ".rb": "ruby",
+    # Web templates & styles
+    ".html": "html",
+    ".htm":  "html",
+    ".css":  "css",
+    ".scss": "scss",
+    ".sass": "sass",
+    ".svelte": "svelte",
+    ".vue":  "vue",
 }
 
 

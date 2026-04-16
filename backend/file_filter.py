@@ -25,6 +25,14 @@ SUPPORTED_EXTENSIONS = {
     ".h",
     # Scripting
     ".rb",
+    # Web templates
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".sass",
+    ".svelte",
+    ".vue",
 }
 
 SKIP_DIRECTORIES = {

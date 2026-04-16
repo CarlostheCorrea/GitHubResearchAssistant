@@ -14,6 +14,7 @@ from backend.chunker import CodeAwareChunker
 from backend.compare_service import BranchCompareService
 from backend.config import Settings, get_settings
 from backend.onboarding_service import OnboardingService
+from backend.repo_map_service import RepoMapService
 from backend.embedder import OpenAIEmbedder
 from backend.file_filter import FileFilter
 from backend.github_loader import GitHubLoader
@@ -41,6 +42,7 @@ from backend.models import (
     RepoDescriptor,
     RepoManifest,
     RepoSummary,
+    RepoMapResponse,
     RepoURLRequest,
     VersionListResponse,
 )
@@ -73,8 +75,9 @@ class ResearchAssistantService:
         self.qa_service = QAService(settings)
         self.judge_service = LLMJudgeService(settings)
         self.qa_graph = RepoQAGraph(self.retriever, self.qa_service, self.judge_service)
-        self.compare_service = BranchCompareService(settings, self.loader)
+        self.compare_service = BranchCompareService(settings, self.loader, self.judge_service)
         self.onboarding_service = OnboardingService(settings)
+        self.repo_map_service = RepoMapService(self.vector_store)
 
     def analyze_repo(self, repo_url: str) -> AnalyzeRepoResponse:
         repo = self.loader.resolve_repo(repo_url)
@@ -241,6 +244,15 @@ class ResearchAssistantService:
             summary=manifest.summary,
             commit_history=manifest.commit_history,
         )
+
+    def get_repo_map(self, repo_url: str) -> RepoMapResponse:
+        repo = self.loader.resolve_repo(repo_url)
+        if not self.vector_store.repo_has_data(repo.repo_id):
+            raise ValueError("Repository has not been analyzed yet. Run /analyze first.")
+        # Use pre-computed dependency links from the manifest (built from full file content)
+        manifest = self._load_manifest(repo.repo_id)
+        known_edges = manifest.summary.dependency_links if manifest else []
+        return self.repo_map_service.get_map(repo.repo_id, repo.repo_name, known_edges)
 
     def list_branches(self, repo_url: str) -> BranchListResponse:
         return self.compare_service.list_branches(repo_url)
@@ -541,6 +553,14 @@ async def repo_summary(repo_url: str = Query(..., min_length=10)) -> RepoSummary
 async def get_onboarding(repo_url: str = Query(..., min_length=10)) -> OnboardingResponse:
     try:
         return service.get_onboarding(repo_url)
+    except Exception as exc:  # noqa: BLE001
+        raise _to_http_exception(exc) from exc
+
+
+@app.get("/repo-map", response_model=RepoMapResponse)
+async def get_repo_map(repo_url: str = Query(..., min_length=10)) -> RepoMapResponse:
+    try:
+        return service.get_repo_map(repo_url)
     except Exception as exc:  # noqa: BLE001
         raise _to_http_exception(exc) from exc
 

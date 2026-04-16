@@ -89,6 +89,17 @@ class ChromaVectorStore:
             pairs.append((self._chunk_from_query_result(document, metadata), float(distance)))
         return pairs
 
+    def get_all_chunks(self, repo_id: str) -> list[ChunkRecord]:
+        """Return every chunk stored for this repo (no embedding query)."""
+        collection = self._get_collection(repo_id)
+        if collection.count() == 0:
+            return []
+        results = collection.get(include=["documents", "metadatas"])
+        chunks: list[ChunkRecord] = []
+        for document, metadata in zip(results.get("documents", []), results.get("metadatas", [])):
+            chunks.append(self._chunk_from_query_result(document, metadata))
+        return chunks
+
     def _get_collection(self, repo_id: str) -> Collection:
         return self.client.get_or_create_collection(
             name=safe_collection_name(repo_id),

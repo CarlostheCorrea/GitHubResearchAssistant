@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from backend.config import Settings
 from backend.github_loader import GitHubLoader
+from backend.judge_service import LLMJudgeService
 from backend.models import (
     AskCompareResponse,
     AskVersionCompareResponse,
@@ -36,9 +37,10 @@ _MAX_CONTEXT_CHARS = 42_000
 
 
 class BranchCompareService:
-    def __init__(self, settings: Settings, loader: GitHubLoader) -> None:
+    def __init__(self, settings: Settings, loader: GitHubLoader, judge: LLMJudgeService | None = None) -> None:
         self.settings = settings
         self.loader = loader
+        self.judge = judge
         self._client: OpenAI | None = None
         self._comparisons: dict[str, CompareVersionsResponse] = {}
 
@@ -143,18 +145,31 @@ class BranchCompareService:
             raise ValueError("Run a version comparison before asking about it.")
 
         client = self._get_client()
+        compare_prompt = self._build_compare_prompt(comparison, question)
         response = client.chat.completions.create(
             model=self.settings.openai_chat_model,
             temperature=0.1,
             messages=[
                 {"role": "system", "content": COMPARE_SYSTEM_PROMPT},
-                {"role": "user", "content": self._build_compare_prompt(comparison, question)},
+                {"role": "user", "content": compare_prompt},
             ],
         )
+        draft_answer = (response.choices[0].message.content or "").strip()
+
+        # LLM-as-a-Judge pass — same quality gate as the main Q&A flow
+        if self.judge is not None:
+            final_answer = self.judge.review_and_revise_with_context(
+                question=question,
+                draft_answer=draft_answer,
+                context_text=compare_prompt,
+            )
+        else:
+            final_answer = draft_answer
+
         return AskVersionCompareResponse(
             compare_id=compare_id,
             question=question,
-            answer=(response.choices[0].message.content or "").strip(),
+            answer=final_answer,
         )
 
     def _commit_from_compare_item(self, item: dict[str, Any]) -> CommitRecord:
