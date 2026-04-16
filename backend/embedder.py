@@ -36,6 +36,21 @@ class OpenAIEmbedder:
         logger.info("Generated embeddings for %s chunks", len(chunks))
         return embeddings
 
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a list of plain strings (not ChunkRecords)."""
+        if not texts:
+            return []
+        client = self._get_client()
+        embeddings: list[list[float]] = []
+        for index in range(0, len(texts), self.settings.embedding_batch_size):
+            batch = texts[index : index + self.settings.embedding_batch_size]
+            response = client.embeddings.create(
+                model=self.settings.openai_embedding_model,
+                input=batch,
+            )
+            embeddings.extend(item.embedding for item in response.data)
+        return embeddings
+
     def embed_query(self, question: str) -> list[float]:
         client = self._get_client()
         response = client.embeddings.create(

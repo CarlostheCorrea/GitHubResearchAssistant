@@ -75,7 +75,7 @@ class ResearchAssistantService:
         self.qa_service = QAService(settings)
         self.judge_service = LLMJudgeService(settings)
         self.qa_graph = RepoQAGraph(self.retriever, self.qa_service, self.judge_service)
-        self.compare_service = BranchCompareService(settings, self.loader, self.judge_service)
+        self.compare_service = BranchCompareService(settings, self.loader, self.judge_service, self.embedder)
         self.onboarding_service = OnboardingService(settings)
         self.repo_map_service = RepoMapService(self.vector_store)
 
@@ -405,6 +405,7 @@ class ResearchAssistantService:
             deleted_manifests += 1
 
         deleted_vector_indexes = self.vector_store.delete_all()
+        self.compare_service.clear()
         message = (
             (
                 f"Cleared all cached repository data "
