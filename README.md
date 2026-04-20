@@ -8,7 +8,7 @@ This project is designed to help a user quickly understand an unfamiliar codebas
 
 The goal is not just to answer questions, but to answer them in a way that is inspectable. The app highlights where the answer came from, which files were used, and which parts of the repository appear to be the key architectural areas such as entry points, configuration, data loading, and inference or training logic.
 
-Beyond question answering, the app offers four workspace tabs that each give a different lens into the repository: Q&A with source citations, Version Comparison for diffing any two commits or branches, an Onboarding Path that generates a guided reading order for new contributors, and an Interactive Repository Map that visualizes file dependencies as a live force-directed graph.
+Beyond question answering, the app offers four workspace tabs that each give a different lens into the repository: Q&A with source citations, Version Comparison for diffing two commits or refs, an Onboarding Path that generates a judged reading guide for new contributors, and an Interactive Repository Map that visualizes file dependencies as a live force-directed graph.
 
 ## Architecture Summary
 
@@ -25,7 +25,7 @@ At a high level, the architecture works like this:
 7.  The QA layer drafts an answer using retrieved evidence plus the global graph context as structural guidance.
 8.  An internal LLM-as-a-Judge pass reviews the draft and revises it if needed before the final answer is returned.
 9.  Commit history is fetched with per-file change tracking and LLM-generated per-commit summaries.
-10. On demand, the onboarding service generates a reading path, core concepts, and contributor profiles.
+10. On demand, the onboarding service generates a reading path, core concepts, and contributor profiles, then runs a structured LLM-as-a-Judge pass before returning the guide.
 11. On demand, the repo map service builds a dependency graph from the stored knowledge graph edges.
 
 Project layout:
@@ -106,7 +106,9 @@ Supported file types:
 
 The project uses LLM-as-a-Judge as an internal answer quality gate in the `/ask` flow. After the QA layer produces a draft answer from retrieved evidence, a second OpenAI call reviews that draft against the same cited sources. If the draft is weak, incomplete, poorly cited, or too confident given the evidence, the judge rewrites it before the final answer is returned to the user.
 
-This means the user only sees the revised final answer, not the intermediate draft or the judge process. The goal is to improve groundedness and clarity without adding extra UI complexity.
+The same quality-gate idea is also used in the Version Comparison and Onboarding sections. Version Comparison drafts an answer from retrieved diff evidence, then the judge revises that answer against the comparison context. Onboarding drafts structured JSON for the reading path, core concepts, and complexity note, then a structured judge pass reviews and revises that JSON before the UI renders it.
+
+This means the user only sees the revised final answer or guide, not the intermediate draft or the judge process. The goal is to improve groundedness and clarity without adding extra UI complexity.
 
 ### Version History and Activity Flow
 
@@ -118,9 +120,9 @@ The changes banner at the top of the history panel shows only genuinely new or r
 
 ### Version Comparison
 
-The Version Comparison tab lets the user compare any two commits or branches. Preset options include first commit to newest, the two most recent commits, or a custom pair selected from dropdowns. The comparison result shows the status (ahead, behind, diverged, identical), commit count, files changed, and total diff size. A file-by-file change list shows each changed file with its status badge and line counts.
+The Version Comparison tab lets the user compare any two commits or refs. Preset options include first commit to newest, the two most recent commits, or a custom pair selected from dropdowns. The comparison result shows the status (ahead, behind, diverged, identical), commit count, files changed, and total diff size. A file-by-file change list shows each changed file with its status badge and line counts.
 
-After comparing, the user can ask a natural-language question about the differences directly in the comparison panel. The LLM answers using the diff context as its evidence rather than the vector index, so answers are scoped precisely to what changed between the two selected versions.
+After comparing, the user can ask a natural-language question about the differences directly in the comparison panel. The backend chunks the diff into per-file, per-commit, and summary chunks, embeds those chunks, and keeps them in a temporary in-memory RAG store for that comparison. Each comparison question embeds the question, retrieves the most relevant diff chunks, drafts an answer from that focused context, and then runs LLM-as-a-Judge before returning the final response.
 
 ### Onboarding Path
 
@@ -128,7 +130,7 @@ The Onboarding Path tab generates a personalized onboarding guide for any analyz
 
 The Reading Path gives a numbered list of five to eight files ordered from easiest to hardest, with a one-sentence explanation of why each file belongs at that position in the reading sequence. The Core Concepts section lists three to five key abstractions specific to the repository with a two-to-three sentence explanation and the files where each concept is most visible. The Contributors section shows each author who appears in the commit history along with their commit count, inferred focus area, and the files they touched most often. A Complexity note at the bottom gives a single plain-English warning about the hardest part of the codebase for a new contributor to understand.
 
-All content is generated by a single structured JSON OpenAI call so it is fast and does not require clearing any cache.
+The onboarding guide is generated by a structured JSON OpenAI call and then reviewed by a structured LLM-as-a-Judge pass. No cache clear is needed; the guide is generated fresh on every request from the current analyzed repository summary and commit history.
 
 ### Interactive Repository Map
 
@@ -244,14 +246,15 @@ If you keep your virtual environment inside the project as `.venv`, avoid runnin
 
 | Variable | Required | Purpose |
 |------------------------|------------------------|------------------------|
-| `OPENAI_API_KEY` | Yes | OpenAI access for embeddings, answer generation, repo summary generation, commit summarization, onboarding guide generation, and judge revision |
-| `OPENAI_CHAT_MODEL` | No | Chat model used for repo summaries, answers, commit explanations, onboarding guides, and judge revision |
+| `OPENAI_API_KEY` | Yes | OpenAI access for embeddings, answer generation, repo summary generation, commit summarization, version comparison answers, onboarding guide generation, and judge revision |
+| `OPENAI_CHAT_MODEL` | No | Chat model used for repo summaries, answers, commit explanations, version comparison answers, onboarding guides, and judge revision |
 | `OPENAI_EMBEDDING_MODEL` | No | Embedding model used for repo chunks and query embeddings |
 | `GITHUB_TOKEN` | No | Recommended for higher GitHub API rate limits and more reliable public repo ingestion |
 | `REQUEST_TIMEOUT_SECONDS` | No | HTTP timeout for GitHub requests |
+| `CLONE_TIMEOUT_SECONDS` | No | Timeout for temporary Git clone operations |
 | `MAX_FILE_BYTES` | No | Per-file size limit |
-| `MAX_TOTAL_REPO_BYTES` | No | Total repository ingestion budget |
-| `MAX_FILES_PER_REPO` | No | Maximum files to ingest |
+| `MAX_COMMIT_HISTORY` | No | Maximum number of recent commits stored in the timeline |
+| `EMBEDDING_BATCH_SIZE` | No | Number of chunks sent per embedding batch |
 | `VECTOR_QUERY_K` | No | Number of vector candidates before reranking |
 | `ANSWER_CONTEXT_K` | No | Final chunk count passed to the LLM |
 
@@ -261,7 +264,7 @@ If you keep your virtual environment inside the project as `.venv`, avoid runnin
 
 Open the app in your browser, paste a public GitHub repository URL into the repository field, and click Analyze Repo.
 
-The backend will fetch the repository, filter supported files, chunk the contents, generate embeddings, build a local Chroma index, compute the knowledge graph, fetch commit history with per-file change tracking, and generate LLM summaries for each commit. Once analysis completes, the Repository Overview section will show the repo summary, language mix, key files, likely entry points, configuration files, and other surfaced repository areas.
+The backend will resolve the repository, temporarily clone the selected branch, filter supported files, chunk the contents, generate embeddings, build a local Chroma index, compute the knowledge graph, fetch commit history with per-file change tracking, and generate LLM summaries for each commit. Once analysis completes, the Repository Overview section will show the repo summary, language mix, key files, likely entry points, configuration files, and other surfaced repository areas. The temporary clone is deleted after analysis; the reusable saved data is the manifest and Chroma vector index.
 
 If the same repository is analyzed again and the HEAD commit SHA has not changed, the cached manifest is returned immediately without re-indexing. The status badge in the top-right of the analyze panel indicates whether the result came from cache or a fresh index.
 
@@ -289,11 +292,11 @@ Switch to the Activity Flow sub-tab to see the same commits rendered as a vertic
 
 Click the Version Comparison tab. After a repository has been analyzed, select a preset or choose custom base and head versions from the dropdowns, then click Compare Versions. The result shows status, commit count, files changed, and a diff size summary. Below that, a file list shows each changed file with its status and line counts.
 
-Use the question box in the comparison panel to ask anything about what changed between the two selected versions.
+Use the question box in the comparison panel to ask anything about what changed between the two selected versions. The comparison question flow uses a temporary in-memory RAG store over the diff chunks and then runs LLM-as-a-Judge on the drafted answer.
 
 ### 5. Generate an onboarding guide
 
-Click the Onboarding tab and then Generate Guide. The backend makes a single structured LLM call and returns a reading path of five to eight files in recommended order, three to five core concepts specific to the repository, a contributor breakdown derived from commit history, and a complexity note about the hardest part of the codebase.
+Click the Onboarding tab and then Generate Guide. The backend makes a structured LLM call, runs a structured LLM-as-a-Judge pass, and returns a reading path of five to eight files in recommended order, three to five core concepts specific to the repository, a contributor breakdown derived from commit history, and a complexity note about the hardest part of the codebase.
 
 No cache clear is needed for the onboarding guide. It is generated fresh on every request.
 
