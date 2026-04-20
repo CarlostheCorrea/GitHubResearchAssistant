@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from openai import OpenAI
 
 from backend.config import Settings
+from backend.judge_service import LLMJudgeService
 from backend.models import (
     CommitRecord,
     ContributorProfile,
@@ -22,8 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 class OnboardingService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, judge: LLMJudgeService | None = None) -> None:
         self.settings = settings
+        self.judge = judge
         self._client: OpenAI | None = None
 
     def generate(
@@ -33,7 +35,7 @@ class OnboardingService:
         commit_history: list[CommitRecord],
     ) -> OnboardingResponse:
         contributors = self._extract_contributors(commit_history)
-        reading_order, core_concepts, complexity_note = self._generate_guide(repo, summary)
+        reading_order, core_concepts, complexity_note = self._generate_guide(repo, summary, contributors)
         return OnboardingResponse(
             repo_name=repo.repo_name,
             reading_order=reading_order,
@@ -100,6 +102,7 @@ class OnboardingService:
         self,
         repo: RepoDescriptor,
         summary: RepoSummary,
+        contributors: list[ContributorProfile],
     ) -> tuple[list[ReadingStep], list[CoreConcept], str]:
         try:
             client = self._get_client()
@@ -144,6 +147,19 @@ class OnboardingService:
             logger.warning("Onboarding guide generation failed: %s", exc)
             return [], [], ""
 
+        if self.judge is not None:
+            data = self.judge.review_structured_json(
+                task_name="developer onboarding guide",
+                draft_payload=data,
+                context_text=self._build_judge_context(repo, summary, contributors),
+                output_contract=(
+                    "A JSON object with reading_order, core_concepts, and complexity_note. "
+                    "reading_order is an array of objects with step, file_path, role, reason. "
+                    "core_concepts is an array of objects with name, description, key_files. "
+                    "complexity_note is a string."
+                ),
+            )
+
         reading_order = [
             ReadingStep(
                 step=item.get("step", i + 1),
@@ -164,6 +180,34 @@ class OnboardingService:
             if item.get("name")
         ]
         return reading_order, core_concepts, str(data.get("complexity_note", ""))
+
+    def _build_judge_context(
+        self,
+        repo: RepoDescriptor,
+        summary: RepoSummary,
+        contributors: list[ContributorProfile],
+    ) -> str:
+        contributor_lines = [
+            f"- {contributor.name}: {contributor.commits} commits, {contributor.focus_area}, files: {', '.join(contributor.recent_files) or 'n/a'}"
+            for contributor in contributors[:8]
+        ]
+        return "\n".join(
+            [
+                f"Repository: {repo.repo_name}",
+                f"Branch: {repo.branch}",
+                f"Languages: {', '.join(summary.detected_languages[:8]) or 'n/a'}",
+                f"High-level summary: {summary.high_level_summary}",
+                f"Key files: {', '.join(summary.key_files[:16]) or 'n/a'}",
+                f"Entry points: {', '.join(summary.probable_entry_points[:8]) or 'n/a'}",
+                f"Config files: {', '.join(summary.probable_config_files[:8]) or 'n/a'}",
+                f"Training files: {', '.join(summary.probable_training_files[:8]) or 'n/a'}",
+                f"Inference files: {', '.join(summary.probable_inference_files[:8]) or 'n/a'}",
+                f"Data files: {', '.join(summary.probable_data_files[:8]) or 'n/a'}",
+                f"Graph context: {summary.global_context[:1200] if summary.global_context else 'n/a'}",
+                "Contributor evidence:",
+                "\n".join(contributor_lines) if contributor_lines else "n/a",
+            ]
+        )
 
     def _get_client(self) -> OpenAI:
         if self._client is None:

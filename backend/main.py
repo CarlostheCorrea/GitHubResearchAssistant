@@ -76,7 +76,7 @@ class ResearchAssistantService:
         self.judge_service = LLMJudgeService(settings)
         self.qa_graph = RepoQAGraph(self.retriever, self.qa_service, self.judge_service)
         self.compare_service = BranchCompareService(settings, self.loader, self.judge_service, self.embedder)
-        self.onboarding_service = OnboardingService(settings)
+        self.onboarding_service = OnboardingService(settings, self.judge_service)
         self.repo_map_service = RepoMapService(self.vector_store)
 
     def analyze_repo(self, repo_url: str) -> AnalyzeRepoResponse:

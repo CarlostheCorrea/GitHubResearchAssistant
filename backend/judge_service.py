@@ -66,6 +66,65 @@ class LLMJudgeService:
         self.settings = settings
         self._client: OpenAI | None = None
 
+    def review_structured_json(
+        self,
+        task_name: str,
+        draft_payload: dict,
+        context_text: str,
+        output_contract: str,
+    ) -> dict:
+        logger.info("Running LLM-as-a-Judge for structured output: %s", task_name)
+        prompt = "\n\n".join(
+            [
+                f"Task: {task_name}",
+                "Repository evidence:",
+                context_text[:7000] if context_text else "No context provided.",
+                "",
+                "Draft JSON:",
+                json.dumps(draft_payload, indent=2),
+                "",
+                "Review and revise the draft JSON so it is grounded in the evidence, complete, and useful.",
+                "Do not invent files, concepts, contributors, behavior, or architecture.",
+                "If evidence is thin, keep the JSON conservative instead of adding unsupported details.",
+                f"Output contract: {output_contract}",
+                "",
+                "Return strict JSON only with one key: final_json.",
+            ]
+        )
+        try:
+            client = self._get_client()
+            completion = client.chat.completions.create(
+                model=self.settings.openai_chat_model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are the final quality gate for structured repository analysis. "
+                            "Return only valid JSON. Preserve the requested schema."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("LLM judge structured JSON API failure; falling back to draft.", exc_info=True)
+            return draft_payload
+
+        content = completion.choices[0].message.content or "{}"
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            logger.warning("LLM judge structured JSON parse failure; falling back to draft. Payload: %s", content[:800], exc_info=True)
+            return draft_payload
+
+        final_json = payload.get("final_json")
+        if not isinstance(final_json, dict):
+            logger.warning("LLM judge structured JSON response missing final_json; falling back to draft.")
+            return draft_payload
+        return final_json
+
     def review_and_revise_with_context(
         self,
         question: str,

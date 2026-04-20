@@ -90,7 +90,7 @@ Every chunk carries metadata including file path, language, chunk type, symbol n
 Supported file types:
 
 | Category | Extensions |
-|---|---|
+|------------------------------------|------------------------------------|
 | Python | `.py` |
 | JavaScript / TypeScript | `.js` `.ts` `.tsx` |
 | Web templates and styles | `.html` `.htm` `.css` `.scss` `.sass` `.svelte` `.vue` |
@@ -243,7 +243,7 @@ If you keep your virtual environment inside the project as `.venv`, avoid runnin
 ### 5. Optional environment variables
 
 | Variable | Required | Purpose |
-|---|---|---|
+|------------------------|------------------------|------------------------|
 | `OPENAI_API_KEY` | Yes | OpenAI access for embeddings, answer generation, repo summary generation, commit summarization, onboarding guide generation, and judge revision |
 | `OPENAI_CHAT_MODEL` | No | Chat model used for repo summaries, answers, commit explanations, onboarding guides, and judge revision |
 | `OPENAI_EMBEDDING_MODEL` | No | Embedding model used for repo chunks and query embeddings |
@@ -312,7 +312,7 @@ Use the Clear All Cache button to remove all cached repository manifests and vec
 ## API Endpoints
 
 | Method | Endpoint | Description |
-|---|---|---|
+|------------------------|------------------------|------------------------|
 | `GET` | `/health` | Service health check |
 | `POST` | `/analyze-repo` | Analyze and index a repository |
 | `POST` | `/ask` | Ask a grounded question about an analyzed repo |
