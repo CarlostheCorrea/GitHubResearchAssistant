@@ -268,6 +268,10 @@ The backend will resolve the repository, temporarily clone the selected branch, 
 
 If the same repository is analyzed again and the HEAD commit SHA has not changed, the cached manifest is returned immediately without re-indexing. The status badge in the top-right of the analyze panel indicates whether the result came from cache or a fresh index.
 
+<img width="1016" height="635" alt="Screenshot 2026-04-20 at 2 49 01 PM" src="https://github.com/user-attachments/assets/712d2d17-f6ac-4c59-b962-c3388bbf204f" />
+
+<img width="968" height="702" alt="Screenshot 2026-04-20 at 2 49 19 PM" src="https://github.com/user-attachments/assets/3c8f3d21-1751-4174-b26e-b9011a64947d" />
+
 ### 2. Ask repository questions
 
 After analysis, use the question box in the Repository Q&A tab to ask natural-language questions. Good example questions include:
@@ -282,11 +286,20 @@ After analysis, use the question box in the Repository Q&A tab to ask natural-la
 
 When you submit a question, the system retrieves the most relevant chunks, drafts an answer, internally reviews that answer with the judge pass, and returns the final grounded answer. The right-hand evidence panel shows each source snippet with its file path, line range, chunk type, and retrieval score.
 
+<img width="1512" height="817" alt="Screenshot 2026-04-20 at 2 50 41 PM" src="https://github.com/user-attachments/assets/03ec390a-0ed4-412c-9926-b6d9598a09a0" />
+
+
+
 ### 3. View commit history and activity flow
 
 After analysis, scroll down to the Version History section. The Timeline sub-tab shows each commit with its SHA badge, author, date, commit message, file-change badges by status, and a one-sentence LLM explanation of what the commit accomplished.
 
 Switch to the Activity Flow sub-tab to see the same commits rendered as a vertical flowchart. An AI-generated summary above the flow describes what kind of work is actively happening in the repository.
+
+<img width="1022" height="329" alt="Screenshot 2026-04-20 at 2 49 33 PM" src="https://github.com/user-attachments/assets/35fca751-d612-4a68-a2c1-e10bf2a27c17" />
+
+<img width="1197" height="788" alt="Screenshot 2026-04-20 at 2 50 04 PM" src="https://github.com/user-attachments/assets/82d8ed14-5bff-4eb5-8ed5-d57ab8e6687b" />
+
 
 ### 4. Compare two versions
 
@@ -294,11 +307,18 @@ Click the Version Comparison tab. After a repository has been analyzed, select a
 
 Use the question box in the comparison panel to ask anything about what changed between the two selected versions. The comparison question flow uses a temporary in-memory RAG store over the diff chunks and then runs LLM-as-a-Judge on the drafted answer.
 
+<img width="1512" height="814" alt="Screenshot 2026-04-20 at 2 51 51 PM" src="https://github.com/user-attachments/assets/536ce74c-1b6f-4c81-91a3-fa5a84cceaa1" />
+
+
 ### 5. Generate an onboarding guide
 
 Click the Onboarding tab and then Generate Guide. The backend makes a structured LLM call, runs a structured LLM-as-a-Judge pass, and returns a reading path of five to eight files in recommended order, three to five core concepts specific to the repository, a contributor breakdown derived from commit history, and a complexity note about the hardest part of the codebase.
 
 No cache clear is needed for the onboarding guide. It is generated fresh on every request.
+
+
+<img width="1283" height="707" alt="Screenshot 2026-04-20 at 2 53 33 PM" src="https://github.com/user-attachments/assets/93e8b66d-8fa0-46b0-9684-fa92f8401d31" />
+
 
 ### 6. Explore the repository map
 
@@ -307,6 +327,8 @@ Click the Repo Map tab and then Generate Map. The backend loads all dependency e
 The D3 force simulation runs and then auto-zooms to fit all nodes. Use scroll or pinch to zoom, drag the canvas to pan, and drag individual nodes to rearrange them. Hover a node to highlight its connections. Click a node to open the side panel with its details and clickable neighbor lists. Use the Find File box to jump to any file by name. Toggle Cluster by Directory to group nodes spatially by their top-level folder.
 
 For the most accurate dependency edges, clear the cache and re-analyze so the map reads from the freshest knowledge graph data.
+
+<img width="1362" height="638" alt="Screenshot 2026-04-20 at 2 54 20 PM" src="https://github.com/user-attachments/assets/321e9b12-dc56-4850-9855-854ecc79132d" />
 
 ### 7. Clear cached data
 
